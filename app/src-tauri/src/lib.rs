@@ -469,6 +469,11 @@ pub fn run() {
                 let _ = w.set_title("Slide Viewer");
             }
             app.set_menu(build_menu(app.handle())?)?;
+            // ==== formats: backend caches (plain-image disk pyramids, CZI attachments) ====
+            if let Ok(d) = app_dir(app.handle(), true) {
+                source::cache::set_cache_dir(d);
+            }
+            // ==== end formats ====
             Ok(())
         })
         .on_menu_event(|app, event| {
