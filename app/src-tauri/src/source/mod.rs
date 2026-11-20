@@ -4,9 +4,12 @@
 //! field names, the Deep-Zoom tile geometry and the registry's public methods are a CONTRACT
 //! (see CONTRACTS.md): lib.rs, scan.rs and the frontend rely on them. Add, don't rename.
 
+pub mod cache;
 pub mod czi;
+pub mod ndpi;
 pub mod openslide;
 pub mod plain;
+pub mod pyramid;
 
 use std::collections::HashMap;
 use std::io::Cursor;
@@ -89,6 +92,40 @@ impl SourceInfo {
 
 pub fn single_plane() -> ZPlane {
     ZPlane { index: 0, offset_nm: None, label: "Z 0".into() }
+}
+
+/// Focal planes for a z-stack whose planes are given in slider order (`offsets_nm`, usually
+/// ascending, bottom to top). `nominal` is the in-focus plane: it always gets `index` 0, so
+/// the default tile URL (no z, or z 0) shows it; the other planes are numbered 1, 2, … in
+/// slider order. Returns the planes (in slider order) and, for each index, its position in
+/// `offsets_nm` (`pos[index]`).
+pub fn make_planes(offsets_nm: &[Option<f64>], nominal: usize) -> (Vec<ZPlane>, Vec<usize>) {
+    if offsets_nm.is_empty() {
+        return (vec![single_plane()], vec![0]);
+    }
+    let nominal = nominal.min(offsets_nm.len() - 1);
+    let mut pos = vec![nominal];
+    let mut planes = Vec::with_capacity(offsets_nm.len());
+    for (i, off) in offsets_nm.iter().enumerate() {
+        let index = if i == nominal {
+            0
+        } else {
+            pos.push(i);
+            (pos.len() - 1) as u32
+        };
+        let label = match off {
+            Some(nm) if nm.abs() < 0.5 => "0 µm".to_string(),
+            Some(nm) => format!("{}{} µm", if *nm > 0.0 { "+" } else { "−" }, trim_num(nm.abs() / 1000.0)),
+            None => format!("Z {}", i + 1),
+        };
+        planes.push(ZPlane { index, offset_nm: *off, label });
+    }
+    (planes, pos)
+}
+
+fn trim_num(v: f64) -> String {
+    let s = format!("{v:.2}");
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
 /// What `open_slide` returns to the frontend (`SlideInfo` in app/src/lib/types.ts).
@@ -311,7 +348,8 @@ pub fn open_source(path: &str) -> Result<Arc<dyn SlideSource>, String> {
             Backend::Czi => czi::CziSource::open(path).map(|s| Arc::new(s) as Arc<dyn SlideSource>),
         };
         match r {
-            Ok(s) => return Ok(s),
+            // every backend gets the shared tile LRU (cache.rs)
+            Ok(s) => return Ok(Arc::new(cache::CachedSource::new(s))),
             Err(e) => errs.push(e),
         }
     }
@@ -411,6 +449,21 @@ mod tests {
         assert_eq!((r.width(), r.height()), (300, 150));
         let o = f.overview(200, 0).unwrap();
         assert_eq!((o.width(), o.height()), (200, 120));
+    }
+
+    #[test]
+    fn plane_numbering() {
+        let (p, pos) = make_planes(&[Some(-800.0), Some(-400.0), Some(0.0), Some(400.0)], 2);
+        assert_eq!(p.iter().map(|z| z.index).collect::<Vec<_>>(), vec![1, 2, 0, 3]);
+        assert_eq!(pos, vec![2, 0, 1, 3]);
+        assert_eq!(p[0].label, "−0.8 µm");
+        assert_eq!(p[2].label, "0 µm");
+        assert_eq!(p[3].label, "+0.4 µm");
+        let (p, pos) = make_planes(&[None, None, None], 1);
+        assert_eq!(p[0].label, "Z 1");
+        assert_eq!(p[1].index, 0);
+        assert_eq!(pos, vec![1, 0, 2]);
+        assert_eq!(make_planes(&[], 0).0, vec![single_plane()]);
     }
 
     #[test]
