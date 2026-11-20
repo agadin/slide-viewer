@@ -1,0 +1,195 @@
+/* Annotations: overlay, inline title editor, annotation list. Owner: annotations. */
+
+.ann-canvas {
+  position: absolute;
+  z-index: 2;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+.ann-title-editor {
+  position: absolute;
+  z-index: 4;
+  width: 180px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 7px;
+  border: 1px solid var(--accent);
+  background: rgba(14, 14, 16, 0.88);
+  color: var(--tx-1);
+  font: 500 12px var(--sans);
+  outline: none;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+
+/* ---------- panel ---------- */
+.ann-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px 14px;
+}
+.ann-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ann-head .grow {
+  flex: 1;
+}
+.ann-note {
+  padding: 7px 9px;
+  border-radius: 9px;
+  font-size: 12px;
+  line-height: 1.35;
+  background: var(--fill-1);
+  color: var(--tx-2);
+}
+.ann-note.warn {
+  background: var(--accent-soft);
+  color: var(--tx-1);
+}
+.ann-note.bad {
+  background: var(--bad-bg);
+  color: var(--bad);
+}
+.ann-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ann-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px 5px 8px;
+  border-radius: 8px;
+  cursor: default;
+}
+.ann-row:hover {
+  background: var(--fill-1);
+}
+.ann-row.sel {
+  background: var(--fill-2);
+}
+.ann-row.hidden .ann-main {
+  opacity: 0.45;
+}
+.ann-swatch {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.6);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+  cursor: pointer;
+}
+.ann-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.ann-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--tx-1);
+}
+.ann-title.empty {
+  color: var(--tx-4);
+  font-style: italic;
+}
+.ann-sub {
+  font-size: 11px;
+  color: var(--tx-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ann-dup {
+  color: var(--accent);
+  margin-left: 4px;
+}
+.ann-actions {
+  display: flex;
+  gap: 0;
+  opacity: 0.55;
+}
+.ann-row:hover .ann-actions,
+.ann-row.sel .ann-actions {
+  opacity: 1;
+}
+.ann-actions .tbtn {
+  height: 22px;
+  padding: 0 6px;
+}
+.ann-rename {
+  width: 100%;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 6px;
+  border: 1px solid var(--accent);
+  background: var(--well);
+  color: var(--tx-1);
+  font: inherit;
+  outline: none;
+}
+.ann-details {
+  grid-column: 2 / 4;
+  width: 100%;
+  min-height: 44px;
+  resize: vertical;
+  padding: 5px 7px;
+  border-radius: 7px;
+  border: 1px solid var(--sep);
+  background: var(--well);
+  color: var(--tx-2);
+  font: 12px var(--sans);
+  outline: none;
+}
+.ann-details:focus {
+  border-color: var(--accent);
+}
+.ann-colors {
+  grid-column: 2 / 4;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.ann-colors .ann-swatch.on {
+  outline: 2px solid var(--sel);
+  outline-offset: 1px;
+}
+.ann-colors input[type="color"] {
+  width: 22px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.ann-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--tx-3);
+}
+.ann-foot .grow {
+  flex: 1;
+}
+.ann-status.error {
+  color: var(--bad);
+}
+.ann-empty {
+  padding: 6px 2px;
+  color: var(--tx-3);
+  font-size: 12px;
+  line-height: 1.45;
+}
