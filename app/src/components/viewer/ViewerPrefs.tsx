@@ -1,10 +1,9 @@
 /**
- * TODO(viewer builder): Preferences ▸ Viewing pane (settings.viewer).
- * Owner: viewer (CONTRACTS.md). Currently a stub.
+ * Preferences ▸ Viewing pane (settings.viewer). Owner: viewer (CONTRACTS.md).
  */
 import { useSettings } from "../../lib/settings";
 import { SliderRow } from "../controls";
-import { Check, PrefGroup, PrefRow } from "../prefsUi";
+import { Check, PrefGroup, PrefRow, Seg } from "../prefsUi";
 
 export function ViewerPrefs() {
   const v = useSettings((s) => s.s.viewer);
@@ -23,6 +22,19 @@ export function ViewerPrefs() {
       <PrefRow label="Over the slide">
         <Check checked={v.showNavigator} onChange={(x) => set("viewer", { showNavigator: x })}>overview map</Check>
         <Check checked={v.showScaleBar} onChange={(x) => set("viewer", { showScaleBar: x })}>scale bar</Check>
+        <Check checked={v.showZoomPresets} onChange={(x) => set("viewer", { showZoomPresets: x })}>zoom presets and magnification</Check>
+      </PrefRow>
+      <PrefRow label="Free rotation step" help="Shift-click the rotate buttons, or press ⇧, and ⇧. (the , and . keys turn 90°)">
+        <Seg
+          value={String(v.rotateStep)}
+          options={[
+            ["5", "5°"],
+            ["15", "15°"],
+            ["30", "30°"],
+            ["45", "45°"],
+          ]}
+          onChange={(x) => set("viewer", { rotateStep: Number(x) })}
+        />
       </PrefRow>
     </PrefGroup>
   );

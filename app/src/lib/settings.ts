@@ -15,6 +15,12 @@ export interface ViewerSettings {
   animate: boolean;
   showNavigator: boolean;
   showScaleBar: boolean;
+  /** zoom preset buttons and the magnification readout */
+  showZoomPresets: boolean;
+  /** degrees per step for free rotation (Shift+, / Shift+. and Shift-click on the rotate buttons) */
+  rotateStep: number;
+  /** PNG snapshot options (remembered between snapshots) */
+  snapshot: { scale: number; annotations: boolean; scaleBar: boolean; title: boolean };
 }
 const viewerDefaults: ViewerSettings = {
   zoomPerScroll: 1.2,
@@ -22,6 +28,9 @@ const viewerDefaults: ViewerSettings = {
   animate: true,
   showNavigator: true,
   showScaleBar: true,
+  showZoomPresets: true,
+  rotateStep: 15,
+  snapshot: { scale: 2, annotations: true, scaleBar: true, title: true },
 };
 // ================================================================ end viewer
 

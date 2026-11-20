@@ -1,0 +1,194 @@
+/* Viewer extras (owner: viewer). Glass cards over the slide, in MSG's style. */
+
+.sv-glass {
+  background: var(--glass-sheen), var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-edge);
+  box-shadow: var(--glass-rim), var(--glass-shadow);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+/* ---------- navigator (overview map), top-left ---------- */
+.sv-nav {
+  position: absolute;
+  z-index: 5;
+  left: 12px;
+  top: 12px;
+  padding: 6px;
+  border-radius: 14px;
+  line-height: 0;
+  user-select: none;
+}
+.sv-nav canvas {
+  display: block;
+  border-radius: 8px;
+  cursor: crosshair;
+  touch-action: none;
+}
+.sv-nav.dragging canvas {
+  cursor: grabbing;
+}
+
+/* ---------- scale bar, bottom-left ---------- */
+.sv-scalebar {
+  position: absolute;
+  z-index: 5;
+  left: 12px;
+  bottom: 14px;
+  padding: 5px 10px 7px;
+  border-radius: 10px;
+  pointer-events: none;
+  font: 500 11px/1 var(--mono);
+  color: var(--tx-1);
+}
+.sv-scalebar .bar {
+  height: 5px;
+  margin-top: 5px;
+  border: 1.5px solid rgba(255, 255, 255, 0.9);
+  border-top: 0;
+  box-sizing: content-box;
+}
+.sv-scalebar .label {
+  white-space: nowrap;
+}
+
+/* ---------- zoom presets + magnification readout, top-right ---------- */
+.sv-zoom {
+  position: absolute;
+  z-index: 5;
+  right: 12px;
+  top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 3px;
+  border-radius: 999px;
+}
+.sv-zoom .tbtn {
+  height: 26px;
+  padding: 0 8px;
+  font: 500 12px/1 var(--mono);
+}
+.sv-zoom .tbtn.digital {
+  color: var(--tx-3);
+}
+.sv-zoom .readout {
+  min-width: 58px;
+  padding: 0 8px 0 10px;
+  font: 600 12px/1 var(--mono);
+  color: var(--accent);
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* ---------- focal plane slider, right edge ---------- */
+.sv-zslider {
+  position: absolute;
+  z-index: 5;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 6px;
+  border-radius: 16px;
+  font: 500 11px/1 var(--mono);
+  color: var(--tx-2);
+}
+.sv-zslider input[type="range"] {
+  writing-mode: vertical-lr;
+  direction: rtl;
+  width: 18px;
+  height: 140px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.sv-zslider .zlabel {
+  max-width: 64px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sv-zslider .tbtn {
+  height: 22px;
+  padding: 0 6px;
+}
+
+/* ---------- toolbar extras ---------- */
+.sv-toolbar .tbtn svg {
+  display: block;
+}
+.sv-toolbar .tool-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+}
+.sv-toolbar .tool-btn .tkey {
+  font: 500 10px/1 var(--mono);
+  color: var(--tx-4);
+}
+.sv-toolbar .tool-btn.on .tkey {
+  color: var(--tx-3);
+}
+.sv-toolbar .rot-readout {
+  min-width: 42px;
+  padding: 0 6px;
+  font: 500 12px/1 var(--mono);
+}
+.sv-rot-pop {
+  position: absolute;
+  z-index: 8;
+  bottom: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 14px;
+  font-size: 12px;
+}
+.sv-rot-pop input[type="range"] {
+  width: 200px;
+  accent-color: var(--accent);
+}
+.sv-rot-pop .mono {
+  min-width: 44px;
+  text-align: right;
+}
+
+/* ---------- snapshot dialog ---------- */
+.sv-snapshot {
+  width: 420px;
+  max-width: calc(100vw - 32px);
+}
+.sv-snapshot .rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 12px 0 4px;
+}
+.sv-snapshot .row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sv-snapshot .row > .lbl {
+  width: 92px;
+  color: var(--tx-3);
+  font-size: 12px;
+  flex: none;
+}
+.sv-snapshot input[type="text"] {
+  flex: 1;
+  min-width: 0;
+}
+.sv-snapshot .size {
+  color: var(--tx-3);
+  font: 500 11px/1.3 var(--mono);
+}

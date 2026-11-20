@@ -10,15 +10,26 @@
  *  - mounts the plug-in points below; their owners fill them in without touching this file:
  *      <AnnotationLayer/> (annotations), useFilterPipeline + filterViewerOptions (filters),
  *      <Navigator/> <ScaleBar/> <ZoomPresets/> <ZSlider/> <Snapshot/> (viewer).
- * TODO(viewer): gestures/preferences polish, navigator, smooth z switching, keyboard pan/zoom.
+ *
+ * Design notes (viewer builder):
+ *  - One OSD viewer per open slide: it is created when `slide.info` changes and destroyed (tiles,
+ *    drawer, WebGL context and canvas backing store released) before the next one, so memory stays
+ *    bounded however many slides are opened in a session.
+ *  - Coordinates go through the viewport with `current = true`, so overlays drawn in OSD's frame
+ *    follow animated zoom/pan/rotation exactly. The slide is the only content and sits at viewport
+ *    x 0…1, so image → viewport is a division by `info.width` (no multi-image warnings while a new
+ *    focal plane cross-fades in).
+ *  - Focal planes: the new plane is added on top of the old one, and the old one is removed when the
+ *    new one has fully loaded (or after a short timeout), so switching z never flashes empty.
+ *  - OSD's own keyboard handling is off (it would steal R/F/0/arrows); lib/keys.ts does keys.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import OpenSeadragon from "openseadragon";
 import { useStore } from "../lib/store";
 import { useSettings } from "../lib/settings";
 import { tileUrl } from "../lib/backend";
-import { imageToNm, magFromUmPerPx, nmToImage, type Pt } from "../lib/coords";
-import { ViewerContext, type ViewerContextValue, type ViewerCoords } from "../lib/viewerContext";
+import { magFromUmPerPx } from "../lib/coords";
+import { ViewerContext, type ViewerContextValue } from "../lib/viewerContext";
 import { filterViewerOptions, useFilterPipeline } from "../lib/filters/pipeline";
 import type { SlideInfo } from "../lib/types";
 import { AnnotationLayer } from "./annotations/AnnotationLayer";
@@ -27,6 +38,10 @@ import { ScaleBar } from "./viewer/ScaleBar";
 import { ZoomPresets } from "./viewer/ZoomPresets";
 import { ZSlider } from "./viewer/ZSlider";
 import { Snapshot } from "./viewer/Snapshot";
+import { MAX_ZOOM_PIXEL_RATIO } from "./viewer/viewMath";
+import { setActiveViewer } from "./viewer/viewerHandle";
+import { makeCoords } from "./viewer/makeCoords";
+import "./viewer/viewer.css";
 
 const tileSourceFor = (info: SlideInfo, z: number) => ({
   width: info.width,
@@ -38,36 +53,27 @@ const tileSourceFor = (info: SlideInfo, z: number) => ({
   getTileUrl: (level: number, x: number, y: number) => tileUrl(info.id, level, x, y, z),
 });
 
-function makeCoords(v: OpenSeadragon.Viewer, info: SlideInfo, host: HTMLElement): ViewerCoords {
-  const P = (p: Pt) => new OpenSeadragon.Point(p.x, p.y);
-  const imageToScreen = (p: Pt): Pt => {
-    const r = v.viewport.imageToViewerElementCoordinates(P(p));
-    return { x: r.x, y: r.y };
-  };
-  const screenToImage = (p: Pt): Pt => {
-    const r = v.viewport.viewerElementToImageCoordinates(P(p));
-    return { x: r.x, y: r.y };
-  };
-  const screenPxPerNm = () => {
-    // distance-based, so rotation doesn't matter
-    const a = imageToScreen({ x: 0, y: 0 });
-    const b = imageToScreen({ x: 1000, y: 0 });
-    return Math.hypot(b.x - a.x, b.y - a.y) / 1000 / (info.mppX * 1000);
-  };
-  return {
-    imageToNm: (p) => imageToNm(info, p),
-    nmToImage: (p) => nmToImage(info, p),
-    imageToScreen,
-    screenToImage,
-    nmToScreen: (p) => imageToScreen(nmToImage(info, p)),
-    screenToNm: (p) => imageToNm(info, screenToImage(p)),
-    screenPxPerNm,
-    umPerScreenPx: () => 1 / (screenPxPerNm() * 1000),
-    eventToScreen: (e) => {
-      const r = host.getBoundingClientRect();
-      return { x: e.clientX - r.left, y: e.clientY - r.top };
-    },
-  };
+const mkPoint = (x: number, y: number) => new OpenSeadragon.Point(x, y);
+
+type AnyTiledImage = OpenSeadragon.TiledImage & { getFullyLoaded?: () => boolean };
+
+/** free the GPU/canvas memory of a viewer that's going away (WebKit keeps canvas backing stores until GC) */
+function releaseViewer(v: OpenSeadragon.Viewer) {
+  try {
+    v.world.removeAll();
+  } catch {
+    /* ignore */
+  }
+  const canvases = Array.from(v.element?.querySelectorAll("canvas") ?? []);
+  try {
+    v.destroy();
+  } catch (e) {
+    console.warn("viewer destroy failed", e);
+  }
+  for (const c of canvases) {
+    c.width = 0;
+    c.height = 0;
+  }
 }
 
 export function SlideViewer() {
@@ -84,7 +90,7 @@ export function SlideViewer() {
   const frameCbs = useRef(new Set<() => void>());
   const zRef = useRef(z);
   zRef.current = z;
-  /** the focal plane the current viewer shows */
+  /** the focal plane the current viewer shows (or is fading to) */
   const shownZ = useRef(0);
   const vsRef = useRef(vs);
   vsRef.current = vs;
@@ -104,13 +110,17 @@ export function SlideViewer() {
       prefixUrl: "",
       showNavigationControl: false,
       showNavigator: false,
+      keyboardNavEnabled: false,
       drawer: "canvas",
       crossOriginPolicy: "Anonymous",
       animationTime: s.animate ? 0.35 : 0,
       springStiffness: 9,
-      maxZoomPixelRatio: 2.5,
+      blendTime: 0.1,
+      maxZoomPixelRatio: MAX_ZOOM_PIXEL_RATIO,
+      minZoomImageRatio: 0.5,
       visibilityRatio: 0.2,
       imageLoaderLimit: 12,
+      maxImageCacheCount: 256,
       degrees: useStore.getState().view.rotation,
       gestureSettingsMouse: { clickToZoom: false, dblClickToZoom: s.dblClickZoom, scrollToZoom: true },
       zoomPerScroll: s.zoomPerScroll,
@@ -119,41 +129,95 @@ export function SlideViewer() {
     } as OpenSeadragon.Options);
 
     shownZ.current = zRef.current;
-    const coords = makeCoords(v, info, host);
+    const coords = makeCoords(v, info, host, mkPoint);
     let raf = 0;
+    let last = { zoom: NaN, um: NaN };
     const publish = () => {
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
-        if (!v.world.getItemCount()) return;
+        if (!v.world || !v.world.getItemCount()) return;
         const um = coords.umPerScreenPx();
-        useStore.getState().setView({ zoom: v.viewport.getZoom(true), umPerScreenPx: um, magnification: magFromUmPerPx(um) });
+        const zoom = v.viewport.getZoom(true);
+        if (zoom === last.zoom && um === last.um) return;
+        last = { zoom, um };
+        useStore.getState().setView({ zoom, umPerScreenPx: um, magnification: magFromUmPerPx(um) });
       });
     };
     // run overlay callbacks in the same frame OSD draws tiles, so overlays stay planted while panning
     const frame = () => {
-      for (const cb of frameCbs.current) cb();
+      for (const cb of frameCbs.current) {
+        try {
+          cb();
+        } catch (e) {
+          console.error("viewer frame callback failed", e);
+        }
+      }
       publish();
     };
     for (const ev of ["update-viewport", "animation", "viewport-change", "resize", "open", "rotate"] as const) v.addHandler(ev, frame);
+    v.addHandler("open-failed", (e: { message?: string }) => {
+      useStore.getState().setUi({ toast: { text: `Could not show the slide: ${e.message ?? "unknown error"}`, kind: "error" } });
+    });
 
     setViewer(v);
+    setActiveViewer(v, info);
     return () => {
       cancelAnimationFrame(raf);
+      setActiveViewer(null, null);
       setViewer(null);
-      v.destroy();
+      releaseViewer(v);
     };
   }, [info]);
 
   // --- view state from the store ---
   useEffect(() => {
-    viewer?.viewport.setRotation(rotation);
+    if (!viewer) return;
+    const cur = viewer.viewport.getRotation(false);
+    if (cur === rotation) return;
+    // small steps (the free-rotation slider) apply at once; 90° turns animate
+    const d = Math.abs(((rotation - cur + 540) % 360) - 180);
+    viewer.viewport.setRotation(rotation, !vsRef.current.animate || d < 20);
   }, [viewer, rotation]);
 
+  // focal plane: fade the new plane in over the old one, then drop the old one
   useEffect(() => {
     if (!viewer || !info || z === shownZ.current) return;
     shownZ.current = z;
-    // swap the tiled image for the new focal plane, keeping the viewport
-    viewer.addTiledImage({ tileSource: tileSourceFor(info, z), index: 0, replace: true } as unknown as Parameters<OpenSeadragon.Viewer["addTiledImage"]>[0]);
+    const world = viewer.world;
+    let done = false;
+    let timer = 0;
+    const keepOnly = (item: OpenSeadragon.TiledImage) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      if (shownZ.current !== z) {
+        // a newer plane was asked for meanwhile: drop this one, the newer one cleans up the rest
+        if (world.getIndexOfItem(item) >= 0) world.removeItem(item);
+        return;
+      }
+      for (let i = world.getItemCount() - 1; i >= 0; i--) {
+        const it = world.getItemAt(i);
+        if (it !== item) world.removeItem(it);
+      }
+    };
+    viewer.addTiledImage({
+      tileSource: tileSourceFor(info, z),
+      index: world.getItemCount(),
+      success: (ev: { item: AnyTiledImage }) => {
+        const item = ev.item;
+        if (shownZ.current !== z) {
+          // superseded by a newer plane while loading
+          world.removeItem(item);
+          return;
+        }
+        if (item.getFullyLoaded?.()) keepOnly(item);
+        else {
+          item.addOnceHandler("fully-loaded-change", () => keepOnly(item));
+          timer = window.setTimeout(() => keepOnly(item), 1500);
+        }
+      },
+    } as unknown as Parameters<OpenSeadragon.Viewer["addTiledImage"]>[0]);
+    return () => clearTimeout(timer);
   }, [viewer, info, z]);
 
   useEffect(() => {
@@ -178,7 +242,7 @@ export function SlideViewer() {
       viewer,
       info: viewer ? info : null,
       host: viewer ? hostRef.current : null,
-      coords: viewer && info && hostRef.current ? makeCoords(viewer, info, hostRef.current) : null,
+      coords: viewer && info && hostRef.current ? makeCoords(viewer, info, hostRef.current, mkPoint) : null,
       onFrame,
     }),
     [viewer, info, onFrame],
@@ -188,7 +252,7 @@ export function SlideViewer() {
     <ViewerContext.Provider value={ctx}>
       <div className="viewer-wrap">
         <div ref={hostRef} className="viewer-host" />
-        {viewer && (
+        {viewer && info && (
           <>
             <AnnotationLayer />
             <Navigator />
