@@ -36,7 +36,8 @@ let saving: Promise<void> | null = null;
 
 const docOf = () => (useStore.getState().annotations.doc as NdpaDocument | null) ?? emptyNdpa();
 
-async function load(slidePath: string) {
+/** read the open slide's .ndpa into the store (exported for tests; the hook calls it on every open) */
+export async function loadAnnotationFile(slidePath: string) {
   ctx = null;
   useAnnUi.setState({ hidden: [], notice: null, loadError: null, jump: null });
   let paths: AnnotationPaths;
@@ -80,7 +81,8 @@ export async function saveNow(): Promise<void> {
   }
   const st = useStore.getState();
   const a = st.annotations;
-  if (!ctx || ctx.blocked || ctx.slidePath !== st.slide.path || !a.filePath || a.save !== "dirty") return;
+  // "error": the last write failed, so the edits are still unsaved: try again (e.g. when the slide is switched)
+  if (!ctx || ctx.blocked || ctx.slidePath !== st.slide.path || !a.filePath || (a.save !== "dirty" && a.save !== "error")) return;
   const items = a.items;
   const xml = serializeNdpa(docOf(), items);
   const c = ctx;
@@ -150,7 +152,7 @@ export function useAnnotationFile(): void {
       ctx = null;
       return;
     }
-    void load(infoPath);
+    void loadAnnotationFile(infoPath);
   }, [openNonce, infoPath]);
 
   // the slide was closed / switched: forget the file

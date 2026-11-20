@@ -182,7 +182,8 @@ export function AnnotationLayer() {
         items: st.annotations.items,
         doc: st.annotations.doc,
         lens: st.view.magnification,
-        z: st.view.z,
+        // NDP.view's <z> is the focal offset in nm (0 = nominal focus), not our plane index
+        z: Math.round(st.slide.info?.zPlanes.find((p) => p.index === st.view.z)?.offsetNm ?? 0),
         ...extra,
       });
     },

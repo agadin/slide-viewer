@@ -222,13 +222,19 @@ function removeIndented(el: Element) {
   el.parentNode?.removeChild(el);
 }
 
+/**
+ * Text as XML 1.0 can hold it: control characters (pasted titles), U+FFFE/U+FFFF and unpaired surrogates
+ * are dropped. The DOM's serializer writes them as they are, which makes a file nothing can read again.
+ */
+export const xmlSafe = (s: string) => s.replace(/[^\t\n\r\x20-\ud7ff\ue000-\ufffd\ud800-\udfff]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g, "");
+
 /** [tag, attributes, children or text]: built with NDP.view's tab indentation */
 type Spec = [string, Record<string, string>, Spec[] | string];
 function build(d: Document, [tag, attrs, body]: Spec, indent: string): Element {
   const el = d.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, xmlSafe(v));
   if (typeof body === "string") {
-    if (body) el.textContent = body;
+    if (body) el.textContent = xmlSafe(body);
   } else {
     for (const c of body) {
       el.appendChild(ws(d, `\n${indent}\t`));
@@ -419,7 +425,7 @@ function setChildText(parent: Element, tag: string, value: string, after?: strin
     if (after === undefined) appendIndented(parent, el);
     else insertAfterIndented(parent, after === null ? null : child(parent, after), el);
   }
-  el.textContent = value;
+  el.textContent = xmlSafe(value);
 }
 
 function writePoints(ann: Element, pts: PtNm[]) {

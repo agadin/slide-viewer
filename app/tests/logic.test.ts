@@ -10,5 +10,7 @@ import "./browser.test";
 import "./viewer.test";
 import "./formats.test";
 import "./release.test";
+import "./ndpa-oracle.test";
+import "./datasafety.test";
 
 await run();

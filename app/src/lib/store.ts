@@ -173,6 +173,21 @@ export interface Store {
   flushAll: () => Promise<void>;
 }
 
+/** ids of slides the backend holds open for us (the backend reuses one id per path) */
+const backendOpen = new Set<number>();
+/**
+ * Close every backend slide except the one shown. While another open is still in flight (`pending`), only
+ * slides that are not the shown one are closed when that one exists; the pending open releases the rest.
+ */
+function releaseHidden(shown: number | null, pending: boolean) {
+  if (pending && shown === null) return; // the newest open hasn't finished: it will clean up when it does
+  for (const id of [...backendOpen]) {
+    if (id === shown) continue;
+    backendOpen.delete(id);
+    void backend.closeSlide(id).catch(() => {});
+  }
+}
+
 export const useStore = create<Store>((set, get) => ({
   browser: initialBrowser,
   slide: initialSlide,
@@ -191,27 +206,28 @@ export const useStore = create<Store>((set, get) => ({
 
   openSlide: async (path) => {
     await get().flushAll();
-    const prev = get().slide.info;
     set((s) => ({
       slide: { ...s.slide, path, info: null, loading: true, error: null },
       annotations: { ...initialAnnotations, tool: s.annotations.tool },
       view: { ...initialView, homeNonce: s.view.homeNonce },
       filters: { ...s.filters, auto: initialAuto },
     }));
+    let info: SlideInfo | null = null;
     try {
-      const info = await backend.openSlide(path);
-      if (get().slide.path !== path) return; // another slide was chosen meanwhile
-      set((s) => ({ slide: { ...s.slide, info, loading: false, openNonce: s.slide.openNonce + 1 } }));
+      info = await backend.openSlide(path);
+      backendOpen.add(info.id);
+      if (get().slide.path === path) set((s) => ({ slide: { ...s.slide, info, loading: false, openNonce: s.slide.openNonce + 1 } }));
     } catch (e) {
       if (get().slide.path === path) set((s) => ({ slide: { ...s.slide, loading: false, error: String(e) } }));
     }
-    if (prev && prev.path !== path) void backend.closeSlide(prev.id).catch(() => {});
+    // close every backend slide that isn't on screen: the previous one, and this one if another slide was
+    // chosen while it opened (stepping quickly through a folder used to leak one open slide per step)
+    releaseHidden(get().slide.info?.id ?? null, get().slide.loading);
   },
   closeSlide: async () => {
     await get().flushAll();
-    const prev = get().slide.info;
     set((s) => ({ slide: { ...initialSlide, openNonce: s.slide.openNonce }, annotations: { ...initialAnnotations, tool: s.annotations.tool } }));
-    if (prev) void backend.closeSlide(prev.id).catch(() => {});
+    releaseHidden(null, false);
   },
   setTool: (tool) => set((s) => ({ annotations: { ...s.annotations, tool } })),
   select: (ids) => set((s) => ({ annotations: { ...s.annotations, selection: ids } })),

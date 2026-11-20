@@ -78,6 +78,11 @@ Format, as written by NDP.view2:
   - arrow: `type="pointer" displayname="AnnotatePointer"` with `<x1>..<y2>`
   - pins can also use flag icons (`<icon>flagred</icon><stricon>iconflagred</stricon>`)
   - MSG's `parseNdpa` skips x1..y2 geometry, so it does not see rulers or arrows (from either app).
+  - `tests/ndpa-oracle.test.ts` checks every new shape's element names and order against the real export
+    (not against our own tables), byte preservation of every test file, ids, MSG's reader and VMS104 nm↔px.
+  - A new viewstate's `<z>` is the focal offset in nm of the plane it was made on (0 = nominal focus), not a plane index.
+  - Characters XML 1.0 can't hold (control characters, U+FFFE/FFFF, unpaired surrogates) are dropped when writing,
+    so a pasted title can never make the file unreadable.
 - **Round-trip preservation:** parse into a DOM. Keep each annotation's original `ndpviewstate`
   node and mutate only the fields we edit. Unknown elements and attributes, and their order, must survive.
   The test is that parse → serialize with no edits gives semantically identical XML for every file in `test-data/`.

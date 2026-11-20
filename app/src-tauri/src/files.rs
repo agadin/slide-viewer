@@ -3,26 +3,65 @@
 
 use std::path::{Path, PathBuf};
 
-/// Crash-safe write: write to a temp file next to the target, then rename over it.
-/// With `keep_backup`, the previous version is kept as `<file>.bak`.
+/// Crash-safe write: write to a temp file next to the target, flush it to disk, then rename over it.
+/// With `keep_backup`, the previous version is kept as `<file>.bak` (itself replaced atomically, so a
+/// crash mid-backup never leaves a truncated .bak either). At every moment the target is either the
+/// old file or the new one, never a partial write, even on power loss.
 pub fn write_atomic(path: &str, contents: &[u8], keep_backup: bool) -> Result<(), String> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
     let target = PathBuf::from(path);
-    if let Some(parent) = target.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("{path}: {e}"))?;
+    let parent = target.parent().map(Path::to_path_buf);
+    if let Some(parent) = &parent {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("{path}: {e}"))?;
+        }
     }
-    let mut tmp = target.clone().into_os_string();
-    tmp.push(".tmp-write");
-    let tmp = PathBuf::from(tmp);
-    std::fs::write(&tmp, contents).map_err(|e| format!("{path}: {e}"))?;
-    if keep_backup && target.exists() {
+    // unique per write, so two writes to one file never share (and truncate) a temp file
+    let sibling = |suffix: &str| {
+        let mut s = target.clone().into_os_string();
+        s.push(format!(".{}-{}{suffix}", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed)));
+        PathBuf::from(s)
+    };
+    let write_synced = |p: &Path, data: &[u8]| -> std::io::Result<()> {
+        let mut f = std::fs::File::create(p)?;
+        f.write_all(data)?;
+        f.sync_all() // F_FULLFSYNC on macOS
+    };
+    let tmp = sibling(".tmp-write");
+    if let Err(e) = write_synced(&tmp, contents) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("{path}: {e}"));
+    }
+    if keep_backup && target.is_file() {
         let mut bak = target.clone().into_os_string();
         bak.push(".bak");
-        let _ = std::fs::copy(&target, PathBuf::from(bak));
+        let bak_tmp = sibling(".bak-tmp");
+        match std::fs::read(&target).and_then(|old| write_synced(&bak_tmp, &old)) {
+            Ok(()) => {
+                if std::fs::rename(&bak_tmp, PathBuf::from(bak)).is_err() {
+                    let _ = std::fs::remove_file(&bak_tmp);
+                }
+            }
+            Err(_) => {
+                let _ = std::fs::remove_file(&bak_tmp);
+            }
+        }
     }
     std::fs::rename(&tmp, &target).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
         format!("{path}: {e}")
-    })
+    })?;
+    // make the rename itself durable (best effort; not possible on Windows)
+    #[cfg(unix)]
+    if let Some(parent) = &parent {
+        let dir = if parent.as_os_str().is_empty() { Path::new(".") } else { parent.as_path() };
+        if let Ok(d) = std::fs::File::open(dir) {
+            let _ = d.sync_all();
+        }
+    }
+    Ok(())
 }
 
 /// Can we create files in `dir`? (Tries a real temp file: permission bits lie on network shares.)
@@ -100,6 +139,46 @@ mod tests {
         assert!(f.starts_with("/data/annotations/") && f.ends_with("/VMS104.ndpi.ndpa"), "{f}");
         assert_eq!(f, fallback_annotation_path(Path::new("/data/annotations"), "/ro/VMS104.ndpi"));
         assert_ne!(f, fallback_annotation_path(Path::new("/data/annotations"), "/other/VMS104.ndpi"));
+    }
+
+    #[test]
+    fn atomic_write_failure_leaves_the_file_alone() {
+        let dir = std::env::temp_dir().join(format!("sv-files-fail-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("a.ndpa");
+        let ps = p.to_string_lossy().to_string();
+        write_atomic(&ps, b"original", true).unwrap();
+        // a crash mid-write leaves a stray temp file: later writes must not care
+        std::fs::write(dir.join("a.ndpa.tmp-write"), b"half").unwrap();
+        // the target path is a directory: the rename fails, nothing is lost, no temp files remain
+        let blocked = dir.join("b.ndpa");
+        std::fs::create_dir_all(blocked.join("x")).unwrap();
+        assert!(write_atomic(&blocked.to_string_lossy(), b"new", true).is_err());
+        assert!(blocked.join("x").is_dir());
+        write_atomic(&ps, b"second", true).unwrap();
+        assert_eq!(std::fs::read(&p).unwrap(), b"second");
+        assert_eq!(std::fs::read(dir.join("a.ndpa.bak")).unwrap(), b"original");
+        let names: Vec<String> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().to_string()).collect();
+        assert!(!names.iter().any(|n| n.contains("-tmp") || (n.contains(".tmp-write") && n != "a.ndpa.tmp-write")), "{names:?}");
+        #[cfg(unix)]
+        {
+            // a read-only folder: the write fails and the old file is untouched
+            use std::os::unix::fs::PermissionsExt;
+            let ro = dir.join("ro");
+            std::fs::create_dir_all(&ro).unwrap();
+            let rp = ro.join("c.ndpa");
+            std::fs::write(&rp, b"keep").unwrap();
+            std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o555)).unwrap();
+            let writable = dir_writable(&ro);
+            let r = write_atomic(&rp.to_string_lossy(), b"lost?", true);
+            std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o755)).unwrap();
+            if !writable {
+                assert!(r.is_err());
+                assert_eq!(std::fs::read(&rp).unwrap(), b"keep");
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
