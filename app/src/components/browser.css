@@ -1,0 +1,254 @@
+/* Slide browser (left sidebar). Owner: browser. Uses the shared tokens from App.css. */
+
+.br {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+.br-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 8px 6px 8px;
+}
+.br-root {
+  flex: 1;
+  min-width: 0;
+  justify-content: flex-start;
+  gap: 7px;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--tx-2);
+}
+.br-root:hover:not(:disabled) {
+  background: var(--fill-1);
+  color: var(--tx-1);
+}
+.br-root b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--tx-1);
+}
+.br-root .br-chev {
+  color: var(--tx-4);
+}
+.br-refresh {
+  width: 28px;
+  height: 28px;
+}
+.br-refresh .spin,
+.br-spinner {
+  animation: br-spin 0.9s linear infinite;
+}
+@keyframes br-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.br-search {
+  margin: 0 10px 6px;
+}
+.br-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 10px 6px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: var(--fill-1);
+  color: var(--tx-3);
+  font-size: 12px;
+}
+.br-status.warn {
+  background: var(--bad-bg);
+  color: var(--bad);
+  justify-content: space-between;
+  word-break: break-word;
+}
+.br-status .btn {
+  height: 22px;
+  flex: none;
+}
+.br-spinner {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 50%;
+  border: 1.5px solid var(--fill-3);
+  border-top-color: var(--accent);
+}
+
+/* ---- the tree ---- */
+.br-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px 6px 10px;
+  outline: none;
+}
+.br-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 8px;
+  border-radius: 8px;
+  color: var(--tx-2);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 32px;
+}
+.br-row:hover {
+  background: var(--fill-1);
+}
+.br-row.on {
+  background: var(--accent-soft);
+  color: var(--tx-1);
+}
+.br-list.kbd-nav:focus .br-row.cur {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+.br-dir {
+  gap: 5px;
+  height: 26px;
+  padding-top: 0;
+  padding-bottom: 0;
+  margin-top: 2px;
+  color: var(--tx-2);
+  font-weight: 600;
+  font-size: 12.5px;
+}
+.br-tri {
+  width: 12px;
+  display: flex;
+  justify-content: center;
+  color: var(--tx-3);
+}
+.br-folder-ic {
+  color: var(--tx-3);
+}
+.br-dir .br-name {
+  flex: 1;
+}
+.br-count {
+  font: 500 11px var(--sans);
+  color: var(--tx-4);
+  padding: 0 4px;
+}
+.br-slide {
+  min-height: 32px;
+}
+.br-slide.compact {
+  min-height: 26px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+.br-thumb {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--well);
+  border: 1px solid var(--sep);
+}
+.br-thumb.has {
+  background: #0d0d0f;
+}
+.br-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.br-ext {
+  font: 600 9.5px var(--sans);
+  letter-spacing: 0.04em;
+  color: var(--tx-4);
+}
+.br-text {
+  flex: 1;
+  min-width: 0;
+}
+.br-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.br-slide .br-name {
+  color: var(--tx-1);
+}
+.br-meta {
+  margin-top: 1px;
+  font-size: 11px;
+  color: var(--tx-4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.br-badge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 18px;
+  padding: 0 6px 0 4px;
+  border-radius: 999px;
+  background: var(--ok-bg);
+  color: var(--ok);
+  font: 600 11px var(--sans);
+}
+.br-badge svg {
+  width: 11px;
+  height: 11px;
+}
+.br-empty-list {
+  padding: 16px 10px;
+  text-align: center;
+}
+.br-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px 8px;
+  border-top: 1px solid var(--sep);
+}
+.br-foot .warn {
+  cursor: help;
+}
+
+/* ---- no folder yet ---- */
+.br-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px 22px;
+  text-align: center;
+}
+.br-empty h3 {
+  margin: 4px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.br-empty p {
+  margin: 0 0 8px;
+  line-height: 1.45;
+}
+.br-empty-ic {
+  color: var(--tx-4);
+}
+.br-empty .btn {
+  min-width: 180px;
+}
