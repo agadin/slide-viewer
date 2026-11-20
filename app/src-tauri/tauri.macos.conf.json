@@ -1,0 +1,14 @@
+{
+  "bundle": {
+    "macOS": {
+      "frameworks": [
+        "frameworks/libopenslide.1.dylib"
+      ],
+      "entitlements": "Entitlements.plist",
+      "minimumSystemVersion": "12.0"
+    },
+    "resources": {
+      "frameworks/OpenSlide-LICENSE.txt": "licenses/OpenSlide-LICENSE.txt"
+    }
+  }
+}
