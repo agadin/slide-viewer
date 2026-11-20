@@ -1,164 +1,194 @@
-import type { Check, GuestPack, Handoff } from "./handoff";
-import type { AnswerKey } from "./answerKey";
-import type { TimeEvent } from "./timing";
-export interface Question {
-  num: number;
-  /** Slide ids (e.g. "VMS146") the student may answer on. */
-  slides: string[];
-  prompt: string;
-  include: boolean;
-}
-
-export interface Student {
-  id: string;
-  name: string;
-  folder: string;
-}
-
-export interface Pin {
-  id: string;
-  studentId: string;
-  /** Slide id, e.g. "VMS146" */
-  slide: string;
-  rawTitle: string;
-  details: string;
-  /** Question this pin was matched to from its title (or inferred), null if ambiguous. */
-  q: number | null;
-  /** When q is null: questions on this slide it could belong to. */
-  candidates: number[];
-  /** True if the question number was not read cleanly from the title. */
-  titleGuessed: boolean;
-  /** Position in nanometres, in NDP.view slide coordinates (relative to slide centre). */
-  xNm: number;
-  yNm: number;
-  annotationType: string;
-  /** brought back from Changed submissions after it left the files: kept even though the files no longer have it */
-  restored?: boolean;
-}
-
 /**
- * A pin that is no longer in the student's files (found by Rescan submissions). It doesn't count as
- * the student's answer any more, but it keeps the grade it had, so the grade can be carried over to
- * the student's new pin, or the pin restored.
+ * Shared types: the CONTRACT between the backend, the store and the feature builders (CONTRACTS.md).
+ * SHARED FILE: builders may APPEND new types in a clearly delimited section at the end; don't rename
+ * or remove fields others use.
  */
-export interface RetiredPin {
-  pin: Pin;
-  /** the question it answered (from its title, inference or a grader's assignment) */
-  q: number | null;
-  /** its grade when it was retired */
-  grade?: { taskId: string; status: GradeStatus; text: string; by?: string; createdAt: number };
-  retiredAt: number;
-  /** the student's new pin for the same question that came in when this one went */
-  replacedBy?: string;
-  /** still waiting in Changed submissions */
-  review?: boolean;
-}
 
-export type GradeStatus = "correct" | "wrong";
+// ---------------------------------------------------------------- slides (mirrors src-tauri/src/source/mod.rs)
 
-/** One ledger entry: a set of pins graded together with one status + text. */
-export interface Group {
-  id: string;
-  taskId: string;
-  status: GradeStatus;
-  text: string;
-  pinIds: string[];
-  createdAt: number;
-  /** who gave this grade: a hand-off grader's name, or several joined with " & " when they agreed; absent = you */
-  by?: string;
-}
-
-export interface GradeState {
-  groups: Record<string, Group>;
-  pinGroup: Record<string, string>;
-  /** Ambiguous pins that the grader assigned to a question by grading them. */
-  assign: Record<string, number>;
-  /** pins graded twice (hand-off overlap): each grader's verdict and whether they agree */
-  checks?: Record<string, Check>;
-}
-
-export interface SlideRef {
-  id: string;
-  path: string;
-}
-
-export interface Session {
-  version: 1;
-  name: string;
-  createdAt: number;
-  savedAt: number;
-  sessionPath: string;
-  submissionsDir: string;
-  slidesDir: string;
-  questions: Question[];
-  students: Student[];
-  pins: Pin[];
-  slides: SlideRef[];
-  grades: GradeState;
-  taskIndex: number;
-  /** host: packs of work sent to other graders */
-  handoffs?: Handoff[];
-  /** guest: this session was opened from a hand-off pack */
-  guestPack?: GuestPack;
-  /** files whose slide the instructor chose in "Things to check" (path in the submissions folder → slide ID) */
-  fileSlides?: Record<string, string>;
-  /** how pin titles were matched to questions when the submissions were read (default DEFAULT_READING_RULES) */
-  readingRules?: ReadingRules;
-  /** "Things to check" the instructor acknowledged (problemKey), so a rescan only shows new ones */
-  scanAck?: string[];
-  /** time spent grading: one entry per grading action (shown only on export) */
-  timeLog?: TimeEvent[];
-  /** the instructor's answer key: painted areas that grade (or suggest) matching pins */
-  key?: AnswerKey;
-  /** pins that left the submission files (Rescan submissions), with the grades they had */
-  retired?: RetiredPin[];
-}
-
-export interface Task {
-  id: string;
-  q: number;
-  slide: string;
-  slideIndex: number;
-  slideCount: number;
-}
-
-export interface SlideInfo {
-  id: number;
-  path: string;
+export interface LevelInfo {
   width: number;
   height: number;
-  mppX: number;
-  mppY: number;
-  xOffsetNm: number;
-  yOffsetNm: number;
+  downsample: number;
+}
+
+export interface ZPlane {
+  /** what the tile URL's z carries */
+  index: number;
+  /** distance from nominal focus, nm (null when unknown) */
+  offsetNm: number | null;
+  label: string;
+}
+
+/** `open_slide` result. Coordinates: level-0 image pixels; nm via lib/coords.ts. */
+export interface SlideInfo {
+  /** registry id; tile URLs use it */
+  id: number;
+  path: string;
+  /** Deep-Zoom tile size (256) and level of full resolution (ceil(log2(max(w, h)))) */
   tileSize: number;
   maxLevel: number;
+  /** backend: "openslide" | "plain" | "czi" */
+  format: string;
+  vendor: string | null;
+  width: number;
+  height: number;
+  /** µm per pixel; 1 when uncalibrated */
+  mppX: number;
+  mppY: number;
+  /** false: the file has no pixel size; the ruler shows px and the UI says "uncalibrated" */
+  calibrated: boolean;
+  /** Hamamatsu offsets of the image centre from the slide centre (nm); 0 elsewhere */
+  xOffsetNm: number;
+  yOffsetNm: number;
+  levels: LevelInfo[];
+  /** always at least one plane (index 0) */
+  zPlanes: ZPlane[];
+  /** associated image names ("thumbnail", "macro", "label") */
+  associated: string[];
 }
 
-export const emptyGrades = (): GradeState => ({ groups: {}, pinGroup: {}, assign: {} });
+// ---------------------------------------------------------------- folder browser (mirrors src-tauri/src/scan.rs)
 
-/** How the submissions are read into answers (Preferences ▸ Reading submissions; saved with each session). */
-export interface ReadingRules {
-  /** which NDP.view annotations count as an answer: pins only, pins and area shapes (circle, rectangle,
-   *  outline), or everything (rulers, arrows and text notes too); a shape counts at its centre */
-  count: "pins" | "shapes" | "all";
-  /** a title that is just a number, or has one number that's a question on the slide ("3", "#3"), counts as that question */
-  bareNumbers: boolean;
-  /** a pin whose title names a question its slide isn't for: place it by the slide as usual, or leave it out */
-  otherQuestion: "slide" | "omit";
-  /** an unlabelled pin on a shared slide goes to the student's one remaining question there */
-  leftover: boolean;
-  /** a pin on a slide several questions use, whose title doesn't say which (after the leftover rule): show it
-   *  on all of them (?), give it to the lowest-numbered one, or leave it out */
-  unlabelled: "all" | "first" | "omit";
-  /** a student with more than one pin for a question: marked wrong automatically, or left for the grader */
-  multiple: "wrong" | "grade";
+export interface ScanEntry {
+  path: string;
+  name: string;
+  /** folder relative to the root, "/"-separated; "" = the root itself */
+  dir: string;
+  /** lower-case, with the dot: ".ndpi" */
+  ext: string;
+  size: number;
+  modifiedMs: number;
+  /** existing annotation file for it, if any (badge in the browser) */
+  annotationPath: string | null;
 }
-export const DEFAULT_READING_RULES: ReadingRules = { count: "shapes", bareNumbers: true, otherQuestion: "slide", leftover: true, unlabelled: "all", multiple: "wrong" };
-/** sessions made before these settings existed read every annotation, so a rescan reads them as before */
-export const LEGACY_READING_RULES: ReadingRules = { ...DEFAULT_READING_RULES, count: "all" };
-export const sessionRules = (s: { readingRules?: Partial<ReadingRules> }): ReadingRules => ({ ...LEGACY_READING_RULES, ...(s.readingRules ?? {}) });
-export const sameReadingRules = (a: ReadingRules, b: ReadingRules) =>
-  (Object.keys(DEFAULT_READING_RULES) as (keyof ReadingRules)[]).every((k) => a[k] === b[k]);
-/** a student's several pins for one question are marked wrong without the grader (the default) */
-export const autoWrongDoubles = (s: { readingRules?: Partial<ReadingRules> }) => sessionRules(s).multiple !== "grade";
+
+export interface ScanResult {
+  root: string;
+  entries: ScanEntry[];
+  errors: string[];
+}
+
+export interface ScanProgress {
+  root: string;
+  folders: number;
+  found: number;
+}
+
+export interface AnnotationPaths {
+  primary: string;
+  primaryExists: boolean;
+  primaryWritable: boolean;
+  fallback: string;
+  fallbackExists: boolean;
+}
+
+// ---------------------------------------------------------------- annotations
+
+/** Slide coordinates in nanometres (NDP.view convention: from the slide centre). */
+export interface PtNm {
+  x: number;
+  y: number;
+}
+
+export type AnnotationKind = "pin" | "ruler" | "freehand" | "circle" | "rectangle" | "other";
+
+/**
+ * One annotation as the app works with it. All geometry in nm (NDP.view coordinates).
+ * - pin: points = [p]
+ * - ruler: points = [a, b]
+ * - circle: points = [centre], radiusNm
+ * - rectangle: 4 points, closed
+ * - freehand: n points, closed or open
+ * - other: an NDP.view annotation we don't edit (arrow, text, …): drawn if possible, always preserved
+ */
+export interface Annotation {
+  /** app-local id (stable while the slide is open) */
+  id: string;
+  /** the ndpviewstate id attribute it came from / will be written with */
+  ndpaId: number | null;
+  kind: AnnotationKind;
+  title: string;
+  details: string;
+  /** "#rrggbb" */
+  color: string;
+  points: PtNm[];
+  radiusNm?: number;
+  closed?: boolean;
+  /** NDP.view's raw `type` / `displayname` attributes (kept for round-tripping) */
+  ndpType?: string;
+  displayName?: string;
+  /** opaque handle owned by lib/ndpa.ts (e.g. the original XML node) so unknown XML survives */
+  source?: unknown;
+}
+
+/** Toolbar tools (SPEC: Pan V, Pin P, Ruler R, Freehand F, Circle C, Rectangle B). */
+export type Tool = "pan" | "pin" | "ruler" | "freehand" | "circle" | "rectangle";
+export const TOOLS: { id: Tool; label: string; key: string }[] = [
+  { id: "pan", label: "Pan", key: "v" },
+  { id: "pin", label: "Pin", key: "p" },
+  { id: "ruler", label: "Ruler", key: "r" },
+  { id: "freehand", label: "Freehand", key: "f" },
+  { id: "circle", label: "Circle", key: "c" },
+  { id: "rectangle", label: "Rectangle", key: "b" },
+];
+
+export type SaveState = "idle" | "dirty" | "saving" | "saved" | "error";
+
+// ---------------------------------------------------------------- filters
+
+export type StainMode = "none" | "he" | "hdab";
+export type StainType = "he" | "hdab" | "special" | "unknown";
+
+/** Image adjustments. Neutral values (DEFAULT_FILTERS) must be a no-op. */
+export interface FilterParams {
+  /** 1 = none; >1 brightens mid-tones */
+  gamma: number;
+  /** -1..1, 0 = none */
+  brightness: number;
+  /** -1..1, 0 = none */
+  contrast: number;
+  /** -1..1, 0 = none (-1 = grey) */
+  saturation: number;
+  /** degrees, -180..180 */
+  hue: number;
+  grayscale: boolean;
+  invert: boolean;
+  /** unsharp mask amount 0..2 and radius in screen px */
+  sharpen: number;
+  sharpenRadius: number;
+  /** auto levels: per-channel black/white points 0..1 (null = off) */
+  levels: { black: [number, number, number]; white: [number, number, number] } | null;
+  /** stain separation: show one stain channel */
+  stain: { mode: StainMode; channel: number; vectors: number[][] | null };
+  /** colour normalisation to the reference H&E */
+  normalize: boolean;
+}
+
+export const DEFAULT_FILTERS: FilterParams = {
+  gamma: 1,
+  brightness: 0,
+  contrast: 0,
+  saturation: 0,
+  hue: 0,
+  grayscale: false,
+  invert: false,
+  sharpen: 0,
+  sharpenRadius: 1,
+  levels: null,
+  stain: { mode: "none", channel: 0, vectors: null },
+  normalize: false,
+};
+
+/** Results of the one-click "Auto" analyses for the open slide. */
+export interface AutoState {
+  status: "idle" | "running" | "done" | "error";
+  error: string | null;
+  /** detected stain type and confidence 0..1 */
+  stainType: StainType | null;
+  confidence: number;
+  /** Macenko stain vectors (rows: stains, cols: RGB OD) */
+  vectors: number[][] | null;
+}
+
+// ---------------------------------------------------------------- feature additions (append below, one delimited block per builder)

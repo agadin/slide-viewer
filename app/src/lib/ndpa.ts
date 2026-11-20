@@ -1,4 +1,9 @@
-/** Parsing of Hamamatsu NDP.view annotation files (.ndpa). */
+/**
+ * Parsing of Hamamatsu NDP.view annotation files (.ndpa). This is Micro Speed Grader's reader, copied
+ * unchanged: files this app writes must parse with it into the same titles and coordinates.
+ * TODO(annotations builder): add the preserving document model + serializer (SPEC "NDPA compatibility").
+ * Owner: annotations (CONTRACTS.md).
+ */
 
 export interface RawAnnotation {
   title: string;

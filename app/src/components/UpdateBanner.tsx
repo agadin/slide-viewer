@@ -16,7 +16,7 @@ const inTauri = inRealApp;
 
 /**
  * Checks GitHub Releases for a newer version once at launch (quietly) and from
- * Micro Speed Grader ▸ Check for Updates… (reports "up to date" too).
+ * Slide Viewer ▸ Check for Updates… (reports "up to date" too).
  */
 export function UpdateBanner() {
   const [st, setSt] = useState<State>({ kind: "idle" });
@@ -52,7 +52,7 @@ export function UpdateBanner() {
           setSt({ kind: "downloading", update, pct: total ? Math.round((got / total) * 100) : null });
         }
       });
-      await useStore.getState().saveNow?.();
+      await useStore.getState().flushAll();
       await relaunch();
     } catch (e) {
       setSt({ kind: "error", msg: String(e) });

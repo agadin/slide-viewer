@@ -39,7 +39,7 @@ export const HOME = ARTICLES.find((a) => a.id === "index");
 export const TOPICS = ARTICLES.filter((a) => a.id !== "index");
 export const article = (id: string) => ARTICLES.find((a) => a.id === id);
 
-/** "img/grading.gif" → bundled URL */
+/** "img/pins.gif" → bundled URL */
 export const helpImage = (src: string) => {
   const name = src.split("/").pop();
   const hit = Object.entries(IMG).find(([p]) => p.endsWith(`/img/${name}`));
@@ -48,7 +48,7 @@ export const helpImage = (src: string) => {
 
 /**
  * A help reference: "topic" or "topic/anchor" (as used by data-help attributes and open_help).
- * Markdown links look like "grading.md#lasso" — both forms resolve here.
+ * Markdown links look like "pins.md#rename" — both forms resolve here.
  */
 export function parseRef(ref: string): { id: string; anchor: string } {
   const [file, hash = ""] = ref.split("#");

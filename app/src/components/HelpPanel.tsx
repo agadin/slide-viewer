@@ -137,21 +137,21 @@ export function HelpWindow() {
 
 /** Fallback when there's no native window (UI tests in a browser): a floating panel inside the page. */
 export function HelpPanel() {
-  const topic = useStore((s) => s.help);
-  const set = useStore((s) => s.set);
+  const topic = useStore((s) => s.ui.help);
+  const setUi = useStore((s) => s.setUi);
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const drag = useRef<{ dx: number; dy: number } | null>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && useStore.getState().help !== null) {
+      if (e.key === "Escape" && useStore.getState().ui.help !== null) {
         e.stopPropagation();
-        set({ help: null });
+        setUi({ help: null });
       }
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [set]);
+  }, [setUi]);
 
   if (topic === null) return null;
 
@@ -174,7 +174,7 @@ export function HelpPanel() {
 
   return (
     <aside className="help-panel" style={pos ? { left: pos.x, top: pos.y, right: "auto" } : undefined} role="dialog" aria-label="Help">
-      <HelpBrowser initial={topic || "index"} onClose={() => set({ help: null })} dragProps={dragProps} />
+      <HelpBrowser initial={topic || "index"} onClose={() => setUi({ help: null })} dragProps={dragProps} />
     </aside>
   );
 }

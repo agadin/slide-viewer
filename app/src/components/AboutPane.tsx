@@ -4,7 +4,7 @@ import pkg from "../../package.json";
 import { emit } from "@tauri-apps/api/event";
 import { openExternal, showHelp } from "../lib/backend";
 
-const REPO = "https://github.com/agadin/micro-speed-grader";
+const REPO = "https://github.com/agadin/slide-viewer";
 
 
 /** Preferences ▸ About: version, help, updates, credits. */
@@ -34,9 +34,9 @@ export function AboutPane() {
       <div className="about-id">
         <img src={iconUrl} alt="" width={72} height={72} />
         <div>
-          <div className="about-name">Micro Speed Grader</div>
+          <div className="about-name">Slide Viewer</div>
           <div className="about-ver">Version {version}</div>
-          <div className="muted small">Grade histology practicals one question at a time.</div>
+          <div className="muted small">View whole-slide images, measure, and pin answers that open in NDP.view2.</div>
         </div>
       </div>
 
@@ -60,7 +60,7 @@ export function AboutPane() {
           Released under the MIT License. Slide images are read with OpenSlide (LGPL 2.1) and shown with OpenSeadragon
           (BSD 3-Clause). Built with Tauri and React.
         </p>
-        <p>Grading data stays on this computer: the app sends nothing anywhere except its update check to GitHub.</p>
+        <p>Your slides and annotations stay on this computer: the app sends nothing anywhere except its update check to GitHub.</p>
       </div>
     </div>
   );
