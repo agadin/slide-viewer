@@ -51,6 +51,11 @@ function useVisibilityWatcher(root: RefObject<HTMLElement | null>): Watch {
         cb(true);
         return () => {};
       }
+      if (obs.current && obs.current.root !== root.current) {
+        obs.current.disconnect(); // the list was re-created
+        obs.current = null;
+        cbs.current.clear();
+      }
       if (!obs.current)
         obs.current = new IntersectionObserver(
           (items) => {
@@ -170,6 +175,9 @@ const DirRow = memo(function DirRow(p: { row: Extract<Row, { kind: "dir" }>; cur
 
 // ---------------------------------------------------------------- the browser
 
+/** the launch restore runs once per window (StrictMode mounts twice in dev) */
+let restoredOnce = false;
+
 export function Browser() {
   const b = useStore((s) => s.browser);
   const setBrowser = useStore((s) => s.setBrowser);
@@ -181,6 +189,9 @@ export function Browser() {
   const searchRef = useRef<HTMLInputElement>(null);
   const watch = useVisibilityWatcher(listRef);
   const [cursor, setCursor] = useState<string | null>(null);
+  /** show the keyboard cursor ring only while the list is driven from the keyboard */
+  const [kbd, setKbd] = useState(false);
+  const scrollPending = useRef(false);
 
   useMenuEvent("open_folder", () => void openFolder());
   useMenuEvent("rescan_folder", () => {
@@ -191,7 +202,8 @@ export function Browser() {
   // reopen the last folder (and slide) at launch
   useEffect(() => {
     const s = useSettings.getState().s.browser;
-    if (!hasTauri || useStore.getState().browser.root || !s.reopenLastFolder || !s.lastFolder) return;
+    if (restoredOnce || !hasTauri || useStore.getState().browser.root || !s.reopenLastFolder || !s.lastFolder) return;
+    restoredOnce = true;
     void openFolder(s.lastFolder, { restoring: true }).then(() => {
       const st = useStore.getState();
       const last = useSettings.getState().s.browser.lastSlide;
@@ -223,11 +235,16 @@ export function Browser() {
   useEffect(() => {
     if (current) setCursor(slideKey(current));
   }, [current]);
-  // keep the cursor row in view
+  // bring the cursor row into view when the cursor moves (its folder may expand a render later)
   useLayoutEffect(() => {
-    if (!cursor) return;
+    scrollPending.current = true;
+  }, [cursor]);
+  useLayoutEffect(() => {
+    if (!cursor || !scrollPending.current) return;
     const el = listRef.current?.querySelector<HTMLElement>(`[data-key="${CSS.escape(cursor)}"]`);
-    el?.scrollIntoView?.({ block: "nearest" });
+    if (!el) return;
+    scrollPending.current = false;
+    el.scrollIntoView?.({ block: "nearest" });
   }, [cursor, rows]);
 
   const pick = useCallback((r: Row) => {
@@ -281,6 +298,7 @@ export function Browser() {
   );
 
   const onListKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (!kbd) setKbd(true);
     if (e.metaKey || e.ctrlKey || e.altKey) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
         e.preventDefault();
@@ -344,6 +362,7 @@ export function Browser() {
       e.preventDefault();
       const first = rows.find((r) => r.kind === "slide") ?? rows[0];
       setCursor(first.key);
+      setKbd(true);
       listRef.current?.focus();
     }
   };
@@ -411,7 +430,15 @@ export function Browser() {
         </div>
       )}
       <VisibleCtx.Provider value={watch}>
-        <div ref={listRef} className="br-list" role="tree" aria-label="Slides" tabIndex={0} onKeyDown={onListKey}>
+        <div
+          ref={listRef}
+          className={`br-list ${kbd ? "kbd-nav" : ""}`}
+          role="tree"
+          aria-label="Slides"
+          tabIndex={0}
+          onKeyDown={onListKey}
+          onMouseDown={() => kbd && setKbd(false)}
+        >
           {rows.map((r) =>
             r.kind === "dir" ? (
               <DirRow key={r.key} row={r} cursor={cursor === r.key} onPick={pick} onMenu={menu} />

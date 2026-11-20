@@ -112,8 +112,7 @@
   background: var(--accent-soft);
   color: var(--tx-1);
 }
-.br-list:focus-visible .br-row.cur,
-.br-list:focus .br-row.cur {
+.br-list.kbd-nav:focus .br-row.cur {
   box-shadow: inset 0 0 0 1.5px var(--accent);
 }
 .br-dir {
