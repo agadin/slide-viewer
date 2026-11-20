@@ -9,5 +9,6 @@ import "./filters.test";
 import "./browser.test";
 import "./viewer.test";
 import "./formats.test";
+import "./release.test";
 
 await run();

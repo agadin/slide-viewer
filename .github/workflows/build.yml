@@ -1,13 +1,14 @@
-# Builds the app on each platform and checks the bundled OpenSlide can open a slide.
-# Runs when the native side or bundling changes, and on demand: the release script
-# (tools/release.sh) starts it to get the Windows installer, which it signs locally.
+# Builds Slide Viewer on each platform and checks the bundled slide libraries (OpenSlide, and libCZI
+# when tools/fetch-libczi.sh exists) can open a slide. Runs when the native side or bundling
+# changes, and on demand: the release script (tools/release.sh) starts it to get the Windows
+# installer, which it signs locally.
 name: Build
 on:
   push:
     branches: [main]
-    paths: ["app/src-tauri/**", "tools/fetch-openslide.sh", "app/package-lock.json", ".github/workflows/build.yml"]
+    paths: ["app/src-tauri/**", "tools/fetch-*.sh", "app/package-lock.json", ".github/workflows/build.yml"]
   pull_request:
-    paths: ["app/src-tauri/**", "tools/fetch-openslide.sh", "app/package-lock.json", ".github/workflows/build.yml"]
+    paths: ["app/src-tauri/**", "tools/fetch-*.sh", "app/package-lock.json", ".github/workflows/build.yml"]
   workflow_dispatch:
     inputs:
       version:
@@ -23,7 +24,7 @@ env:
   TEST_SLIDE: https://openslide.cs.cmu.edu/download/openslide-testdata/Aperio/CMU-1-Small-Region.svs
 jobs:
   slides:
-    name: OpenSlide smoke test (${{ matrix.name }})
+    name: Slide libraries smoke test (${{ matrix.name }})
     strategy:
       fail-fast: false
       matrix:
@@ -43,25 +44,20 @@ jobs:
         with:
           workspaces: app/src-tauri
           key: ${{ matrix.os }}
-      - run: tools/fetch-openslide.sh ${{ matrix.lib }}
+      - name: Fetch the native libraries
+        run: |
+          tools/fetch-openslide.sh ${{ matrix.lib }}
+          if [ -x tools/fetch-libczi.sh ]; then tools/fetch-libczi.sh ${{ matrix.lib }}; fi
       - name: Rust tests
         working-directory: app/src-tauri
         run: cargo test --release --lib
-      - name: Open a slide and read a tile with the bundled library
+      - name: Open a slide and render tiles with the fetched libraries
         working-directory: app/src-tauri
         run: |
-          cargo build --release --example tileserver
           curl -fsSL --retry 3 -o "$RUNNER_TEMP/test.svs" "$TEST_SLIDE"
-          if [ "${{ matrix.lib }}" = mac ]; then lib="$PWD/frameworks/libopenslide.1.dylib"; else lib="$PWD/lib/libopenslide-1.dll"; fi
-          OPENSLIDE_LIB="$lib" target/release/examples/tileserver 8787 &
-          sleep 2
           slide="$RUNNER_TEMP/test.svs"
           if [ "${{ matrix.lib }}" = windows ]; then slide="$(cygpath -m "$slide")"; fi
-          info=$(curl -fsS "http://127.0.0.1:8787/open?path=$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1]))' "$slide")")
-          echo "$info"
-          id=$(echo "$info" | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])')
-          curl -fsS -o tile.jpg "http://127.0.0.1:8787/tile/$id/0/0_0.jpg"
-          python3 -c 'import sys;b=open("tile.jpg","rb").read();assert b[:2]==b"\xff\xd8" and len(b)>500,len(b);print("tile ok,",len(b),"bytes")'
+          cargo run --release --example smoke -- "$slide"
 
   windows:
     name: Windows installer
@@ -83,7 +79,11 @@ jobs:
         with:
           workspaces: app/src-tauri
           key: windows-bundle
-      - run: tools/fetch-openslide.sh windows
+      - name: Fetch the native libraries
+        run: |
+          tools/fetch-openslide.sh windows
+          if [ -x tools/fetch-libczi.sh ]; then tools/fetch-libczi.sh windows; fi
+          ls -l app/src-tauri/lib
       - name: Check the version matches the release
         if: inputs.version != ''
         run: |
@@ -93,9 +93,27 @@ jobs:
         run: npm ci
       - name: Build the installer
         working-directory: app
-        # the updater signature is added by tools/release.sh on the release machine, so the key
-        # never leaves it
+        # The updater signature is added by tools/release.sh on the release machine, so the key
+        # never leaves it. Every DLL in src-tauri/lib is bundled ("lib/*.dll" in tauri.windows.conf.json).
         run: npx tauri build --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":false}}'
+      - name: Install it and open a slide with only the installed DLLs
+        # Proves the installer carries every DLL the slide libraries need: the smoke test runs from
+        # the install folder with the source-tree copies moved out of the way.
+        run: |
+          exe=$(ls app/src-tauri/target/release/bundle/nsis/*.exe | head -1)
+          "$exe" //S
+          dir="$LOCALAPPDATA/Slide Viewer"
+          for _ in $(seq 1 30); do [ -f "$dir/libopenslide-1.dll" ] && break; sleep 2; done
+          echo "installed:"; ls -l "$dir"
+          for f in app/src-tauri/lib/*.dll; do
+            [ -f "$dir/$(basename "$f")" ] || { echo "the installer is missing $(basename "$f")"; exit 1; }
+          done
+          (cd app/src-tauri && cargo build --release --example smoke)
+          cp app/src-tauri/target/release/examples/smoke.exe "$dir/"
+          mv app/src-tauri/lib "$RUNNER_TEMP/lib-moved"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/test.svs" "$TEST_SLIDE"
+          (cd "$dir" && ./smoke.exe "$(cygpath -m "$RUNNER_TEMP/test.svs")")
+          mv "$RUNNER_TEMP/lib-moved" app/src-tauri/lib
       - uses: actions/upload-artifact@v4
         with:
           name: windows-installer

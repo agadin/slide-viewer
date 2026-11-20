@@ -1,9 +1,10 @@
 import { inRealApp } from "../lib/backend";
 import { useEffect, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { useStore } from "../lib/store";
+import { useMenuEvent } from "../lib/menu";
+import "./release.css";
 
 type State =
   | { kind: "idle" }
@@ -35,11 +36,11 @@ export function UpdateBanner() {
     if (!inTauri() || import.meta.env.DEV) return;
     void run(false);
   }, []);
-  useEffect(() => {
-    if (!inTauri()) return;
-    const un = listen<string>("menu", ({ payload }) => payload === "check_updates" && void run(true));
-    return () => void un.then((f) => f());
-  }, []);
+  // the menu item, Preferences ▸ About, and fireMenu("check_updates") all land here
+  useMenuEvent("check_updates", () => {
+    if (inTauri()) void run(true);
+    else setSt({ kind: "error", msg: "updates are only available in the installed app" });
+  });
 
   const install = async (update: Update) => {
     let total = 0, got = 0;
@@ -67,6 +68,7 @@ export function UpdateBanner() {
         <>
           <span>
             <b>Version {st.update.version}</b> is available.
+            {st.update.body ? <span className="update-notes" title={st.update.body}>{st.update.body}</span> : null}
           </span>
           <button className="btn light" onClick={() => install(st.update)}>
             Install &amp; restart
@@ -76,7 +78,11 @@ export function UpdateBanner() {
           </button>
         </>
       )}
-      {st.kind === "downloading" && <span>Downloading {st.update.version}… {st.pct != null ? `${st.pct}%` : ""}</span>}
+      {st.kind === "downloading" && (
+        <span>
+          Downloading {st.update.version}… {st.pct != null ? `${st.pct}%` : ""} Your annotations are saved before the app restarts.
+        </span>
+      )}
       {st.kind === "uptodate" && (
         <>
           <span>You have the latest version.</span>

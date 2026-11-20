@@ -50,6 +50,9 @@ export function AboutPane() {
         <button className="btn" onClick={checkUpdates} disabled={checking} title="The result shows in the main window">
           {checking ? "Checking…" : "Check for Updates…"}
         </button>
+        <button className="btn" onClick={() => void openExternal(`${REPO}/releases`)}>
+          What's new ↗
+        </button>
         <button className="btn" onClick={() => void openExternal(REPO)}>
           Project page ↗
         </button>
@@ -57,8 +60,9 @@ export function AboutPane() {
 
       <div className="about-credits muted small">
         <p>
-          Released under the MIT License. Slide images are read with OpenSlide (LGPL 2.1) and shown with OpenSeadragon
-          (BSD 3-Clause). Built with Tauri and React.
+          Released under the MIT License. Slide images are read with OpenSlide (LGPL 2.1) and, for Zeiss .czi files,
+          libCZI (LGPL 3.0), and shown with OpenSeadragon (BSD 3-Clause). Built with Tauri and React. Annotation files
+          use the .ndpa format of Hamamatsu NDP.view2; Slide Viewer is not made by or affiliated with Hamamatsu.
         </p>
         <p>Your slides and annotations stay on this computer: the app sends nothing anywhere except its update check to GitHub.</p>
       </div>

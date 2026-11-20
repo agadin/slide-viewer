@@ -48,13 +48,10 @@ export const helpImage = (src: string) => {
 
 /**
  * A help reference: "topic" or "topic/anchor" (as used by data-help attributes and open_help).
- * Markdown links look like "pins.md#rename" — both forms resolve here.
+ * Markdown links look like "annotating.md#exam-answers" — both forms resolve here.
+ * (In lib/helpRefs.ts so the logic tests can check every reference without the bundled articles.)
  */
-export function parseRef(ref: string): { id: string; anchor: string } {
-  const [file, hash = ""] = ref.split("#");
-  const [id, anchor = hash] = file.replace(/\.md$/, "").replace(/^\.\//, "").split("/");
-  return { id: id || "index", anchor };
-}
+export { parseRef } from "./helpRefs";
 
 export interface Hit {
   id: string;

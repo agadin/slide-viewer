@@ -1,8 +1,8 @@
 {
   "bundle": {
     "resources": {
-      "lib/libopenslide-1.dll": "libopenslide-1.dll",
-      "lib/OpenSlide-LICENSE.txt": "licenses/OpenSlide-LICENSE.txt"
+      "lib/*.dll": "./",
+      "lib/*LICENSE*": "licenses/"
     },
     "windows": {
       "nsis": {

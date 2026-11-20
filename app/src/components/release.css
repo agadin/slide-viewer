@@ -1,0 +1,17 @@
+/* Release-owned styles (UpdateBanner, AboutPane). Uses App.css tokens only. */
+
+/* the toolbar floats at the bottom of the viewer, so the update toast sits under the top bar */
+.app-shell > .update-toast {
+  top: 58px;
+  bottom: auto;
+  max-width: calc(100vw - 32px);
+}
+.update-notes {
+  display: inline-block;
+  max-width: 340px;
+  margin-left: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  color: var(--tx-3);
+}
