@@ -8,5 +8,6 @@ import "./annotations.test";
 import "./filters.test";
 import "./browser.test";
 import "./viewer.test";
+import "./release.test";
 
 await run();
