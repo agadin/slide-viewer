@@ -7,6 +7,7 @@
 use image::{imageops::FilterType, RgbImage};
 
 use super::ndpi::NdpiZStack;
+use super::plain::MAX_PLAUSIBLE_MPP;
 use super::{dz_tile_rect, make_planes, single_plane, LevelInfo, SlideSource, SourceInfo};
 use crate::slide::Slide;
 
@@ -21,8 +22,9 @@ impl OpenSlideSource {
     pub fn open(path: &str) -> Result<OpenSlideSource, String> {
         let slide = Slide::open(path)?;
         let (width, height) = (slide.levels[0].0, slide.levels[0].1);
-        let mx = slide.property_f64("openslide.mpp-x").filter(|v| *v > 0.0);
-        let my = slide.property_f64("openslide.mpp-y").filter(|v| *v > 0.0);
+        // generic TIFFs report their dpi as mpp: 72 dpi (352 µm/px) is not a calibration
+        let mx = slide.property_f64("openslide.mpp-x").filter(|v| *v > 0.0 && *v <= MAX_PLAUSIBLE_MPP);
+        let my = slide.property_f64("openslide.mpp-y").filter(|v| *v > 0.0 && *v <= MAX_PLAUSIBLE_MPP);
         let calibrated = mx.is_some() || my.is_some();
         let (mpp_x, mpp_y) = match (mx, my) {
             (Some(x), Some(y)) => (x, y),
