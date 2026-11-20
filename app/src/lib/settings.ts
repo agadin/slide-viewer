@@ -55,11 +55,23 @@ const filterDefaults: FilterSettings = {
 export interface BrowserSettings {
   /** reopen this folder at launch */
   lastFolder: string | null;
+  /** thumbnail width in the list, CSS px; 0 = no thumbnails (compact list) */
   thumbSize: number;
+  /** open the last folder again when the app starts */
+  reopenLastFolder: boolean;
+  /** …and the slide that was open in it */
+  reopenLastSlide: boolean;
+  lastSlide: string | null;
+  /** collapsed folders (ScanEntry.dir values) per scanned root, most recent last */
+  collapsed: Record<string, string[]>;
 }
 const browserDefaults: BrowserSettings = {
   lastFolder: null,
   thumbSize: 72,
+  reopenLastFolder: true,
+  reopenLastSlide: true,
+  lastSlide: null,
+  collapsed: {},
 };
 // ================================================================ end browser
 

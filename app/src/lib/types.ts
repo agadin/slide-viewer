@@ -192,3 +192,11 @@ export interface AutoState {
 }
 
 // ---------------------------------------------------------------- feature additions (append below, one delimited block per builder)
+
+// ==== browser: scan.rs extra fields ====
+/** declaration merging: fields scan.rs adds to ScanEntry */
+export interface ScanEntry {
+  /** annotations (`ndpviewstate` elements) in `annotationPath`; null/absent when there is no file */
+  annotationCount?: number | null;
+}
+// ==== end browser ====
