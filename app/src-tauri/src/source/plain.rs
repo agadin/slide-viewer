@@ -661,6 +661,35 @@ mod tests {
         assert_eq!(pal, vec![255, 128, 0]);
     }
 
+    /// A flat TIFF above MEM_PIXELS goes through the disk pyramid and is reused on reopen.
+    /// Writes ~200 MB to the temp dir: `cargo test --release -- --ignored large_tiff`.
+    #[test]
+    #[ignore]
+    fn large_tiff_uses_disk() {
+        let (w, h) = (8300u32, 8200u32);
+        let img = RgbImage::from_fn(w, h, |x, y| image::Rgb([(x % 251) as u8, (y % 241) as u8, ((x ^ y) % 256) as u8]));
+        let p = tmp("big.tif");
+        write_tiff(&p, &img, Some(40_000));
+        drop(img);
+        let path = p.to_str().unwrap();
+        let t0 = std::time::Instant::now();
+        let s = PlainSource::open(path).unwrap();
+        let first = t0.elapsed();
+        assert!(matches!(s.pyr.levels[0], Canvas::Disk { .. }));
+        let max = dz_max_level(w as i64, h as i64);
+        let t = s.tile(max, 20, 17, 0).unwrap();
+        assert_eq!(t.get_pixel(3, 4), &image::Rgb([((20 * 256 + 3) % 251) as u8, ((17 * 256 + 4) % 241) as u8, (((20 * 256 + 3) ^ (17 * 256 + 4)) % 256) as u8]));
+        drop(s);
+        let t1 = std::time::Instant::now();
+        let again = PlainSource::open(path).unwrap();
+        let second = t1.elapsed();
+        eprintln!("first open {first:?}, reopen {second:?}");
+        assert!(second < first);
+        assert_eq!(again.tile(max, 20, 17, 0).unwrap(), t);
+        let _ = std::fs::remove_dir_all(cache_dir("plain").join(file_key(path)));
+        let _ = std::fs::remove_file(&p);
+    }
+
     /// The disk path: force it with a small image by building through `Canvas::disk` directly
     /// is covered in pyramid.rs; here, check the cache key reuse logic end to end.
     #[test]

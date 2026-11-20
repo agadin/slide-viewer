@@ -451,6 +451,26 @@ mod tests {
         assert_eq!((o.width(), o.height()), (200, 120));
     }
 
+    /// The JSON shape the frontend's `SlideInfo` (app/src/lib/types.ts) mirrors; the same
+    /// object is the fixture in app/tests/formats.test.ts.
+    #[test]
+    fn slide_info_json_shape() {
+        let mut si = SourceInfo::basic("plain", 1000, 600);
+        si.z_planes = make_planes(&[Some(-500.0), Some(0.0)], 1).0;
+        si.associated = vec!["thumbnail".into()];
+        let info = SlideInfo { id: 1, path: "/a/b.png".into(), tile_size: TILE_SIZE, max_level: dz_max_level(1000, 600), source: si };
+        let v = serde_json::to_value(&info).unwrap();
+        let want = serde_json::json!({
+            "id": 1, "path": "/a/b.png", "tileSize": 256, "maxLevel": 10,
+            "format": "plain", "vendor": null, "width": 1000, "height": 600,
+            "mppX": 1.0, "mppY": 1.0, "calibrated": false, "xOffsetNm": 0.0, "yOffsetNm": 0.0,
+            "levels": [{ "width": 1000, "height": 600, "downsample": 1.0 }],
+            "zPlanes": [{ "index": 1, "offsetNm": -500.0, "label": "−0.5 µm" }, { "index": 0, "offsetNm": 0.0, "label": "0 µm" }],
+            "associated": ["thumbnail"]
+        });
+        assert_eq!(v, want);
+    }
+
     #[test]
     fn plane_numbering() {
         let (p, pos) = make_planes(&[Some(-800.0), Some(-400.0), Some(0.0), Some(400.0)], 2);
