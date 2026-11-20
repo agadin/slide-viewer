@@ -41,6 +41,12 @@ On Windows, use **Ctrl** where this page says **⌘**, and **Alt** for **⌥**. 
 | ⌘0 | Zoom to fit |
 | ] or → | Next slide in the folder |
 | [ or ← | Previous slide in the folder |
+| ⇧ + arrow | Pan a quarter screen |
+| + / − | Zoom in / out |
+| , / . | Rotate the view 90° left / right |
+| ⇧, / ⇧. | Rotate by the small step (15°) |
+| Page Up / Page Down | Focal plane up / down (z-stacks) |
+| Right-drag | Pan, with any tool |
 
 ## Window and files
 
@@ -48,11 +54,12 @@ On Windows, use **Ctrl** where this page says **⌘**, and **Alt** for **⌥**. 
 | --- | --- |
 | ⌘O | Open a folder of slides |
 | ⌘R | Rescan the folder |
-| ⇧⌘S | Save a snapshot (PNG) |
+| ⇧⌘S or ⇧S | Save a snapshot (PNG) |
+| \\ | Adjustments on / off (compare with the original) |
 | ⌥⌘1 | Show or hide the slide browser |
 | ⌥⌘2 | Show or hide the side panel |
 | ⌘, | Preferences |
 | ⇧⌘/ | Help |
 | ⌘W | Close the window |
 
-Rotation has no key of its own: use **View ▸ Rotate Left** and **View ▸ Rotate Right** (see [Rotate](viewing.md#rotate)).
+See [Rotate](viewing.md#rotate) and [Focal planes](viewing.md#focal-planes) for more on those keys.

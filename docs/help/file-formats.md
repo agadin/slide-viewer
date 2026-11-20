@@ -8,9 +8,11 @@ order: 6
 
 ## Slides
 
+Every file is shown the same way: zoom and pan, pins and rulers, adjustments. Annotations are saved in NDP.view2's `.ndpa` format whatever the slide type.
+
 | Format | Files | Notes |
 | --- | --- | --- |
-| Hamamatsu | `.ndpi`, `.vms`, `.vmu` | NDP.view2's own format. Pins line up exactly with NDP.view2. |
+| Hamamatsu | `.ndpi`, `.vms`, `.vmu` | NDP.view2's own format. Pins line up exactly with NDP.view2. Z-stacks show every focal plane. |
 | Aperio | `.svs` | |
 | Generic tiled TIFF | `.tif`, `.tiff` | Whole-slide TIFFs, including pyramidal and OME-TIFF files written by most scanners. |
 | Leica | `.scn` | |
@@ -19,12 +21,25 @@ order: 6
 | Philips | `.tiff` | |
 | Sakura | `.svslide` | |
 | DICOM | `.dcm` (whole-slide) | Open any `.dcm` file of the series; the rest of the series must be in the same folder. |
-| Zeiss | `.czi` | Including z-stacks: see [Focal planes](viewing.md#focal-planes). |
-| Ordinary pictures | `.jpg`, `.jpeg`, `.png`, `.bmp`, `.webp`, flat `.tif` | Photos and screenshots. Usually [uncalibrated](measuring.md#uncalibrated-slides). |
+| Zeiss | `.czi` | Brightfield and fluorescence (channels are coloured with the settings saved in the file). Z-stacks show every plane: see [Focal planes](viewing.md#focal-planes). Several scenes in one file are shown together. |
+| Ordinary pictures | `.jpg`, `.jpeg`, `.png`, `.bmp`, `.webp`, flat `.tif` | Photos, screenshots and stitched images. Very large flat TIFFs are prepared once and kept in the app's cache, so the next time they open at once. Usually [uncalibrated](measuring.md#uncalibrated-slides). |
 
-Slides are read with [OpenSlide](https://openslide.org) and, for Zeiss files, [libCZI](https://github.com/ZEISS/libczi). Both are built into the app.
+Slides are read with [OpenSlide](https://openslide.org) and, for Zeiss files, [libCZI](https://github.com/ZEISS/libczi). Both are built into the app. The label, macro and thumbnail pictures a scanner saves are used where the file has them.
 
 **Not yet supported:** Olympus `.vsi`. Convert it to OME-TIFF (for example with QuPath or bfconvert) and open that.
+
+### Scale and measurements
+
+The ruler and scale bar need to know how big a pixel is.
+
+- Slide scanner files (NDPI, SVS, CZI, …) always say, so measurements are in µm and mm.
+- Pictures and TIFFs often don't. When the file stores a real microscope pixel size (TIFF resolution, ImageJ's *unit=micron*, a camera's EXIF or PNG density), it's used. Ordinary picture defaults such as 72 or 300 dpi are ignored.
+- If the size isn't known, the slide is shown as **uncalibrated**: measurements are in pixels instead of µm.
+
+### If a slide won't open
+
+- **"CZI support is not installed"**: this copy of the app was built without the Zeiss reader. Other formats still work.
+- **"Not a supported slide file"**: the file is damaged, still copying, or a format the viewer doesn't read. Open it in the scanner's own viewer to check it.
 
 ## Annotation files (.ndpa)
 
@@ -40,4 +55,5 @@ See [Where annotations are saved](annotating.md#where-annotations-are-saved) for
 ## Other files the app makes
 
 - **Thumbnails** for the slide browser are kept in the app's cache folder, never next to your slides. Deleting them is safe; they're made again.
+- **Prepared pyramids** of very large plain TIFF and picture files are kept in the app's cache folder too (the six most recent), so they reopen instantly.
 - **Snapshots** are PNG pictures, saved where you choose.

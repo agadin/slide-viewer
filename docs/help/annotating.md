@@ -15,13 +15,13 @@ Choose a tool from the toolbar at the bottom of the slide, or press its key:
 | Tool | Key | How to use it |
 | --- | --- | --- |
 | **Pan** | V | Drag to move around. Click a pin or shape to select it. |
-| **Pin** | P | Click to place a pin, then type its title. |
-| **Ruler** | R | Drag from one end to the other. See [Measuring](measuring.md#the-ruler). |
-| **Freehand** | F | Drag to draw around a structure; let go to close the outline. |
+| **Pin** | P | Click to place a pin, type its title, and press **↵**. Dragging still pans. |
+| **Ruler** | R | Drag from one end to the other. The length shows as you drag. Let go to keep it, or press **Esc** to cancel. See [Measuring](measuring.md#the-ruler). |
+| **Freehand** | F | Drag to draw around a structure; let go to close the outline. Or click point by point, then double-click (or press **↵**, or click the first point) to close it. **⌫** removes the last point. |
 | **Circle** | C | Drag from the centre outwards. |
 | **Rectangle** | B | Drag from one corner to the opposite corner. |
 
-**Esc** cancels a shape you're drawing and goes back to **Pan**.
+The scroll wheel zooms with every tool, and dragging with the right mouse button pans. **Esc** cancels a shape you're drawing; press it again to clear the selection, and once more to go back to **Pan**.
 
 ## Place a pin
 
@@ -29,16 +29,26 @@ Choose a tool from the toolbar at the bottom of the slide, or press its key:
 2. Click exactly on the structure. The pin's point is its tip.
 3. Type a title and press **↵**. The title can be anything: *Q3*, *eccrine sweat gland*, *ask about this*.
 
-Titles show next to the pins on the slide; turn them off in **Preferences ▸ Annotations** if they get in the way.
+Titles show next to the pins on the slide; turn them off in **Preferences ▸ Pins & shapes** if they get in the way.
 
 ## Edit, rename and delete
 
-- **Select**: click a pin or shape with the Pan tool, or click its row in the **Annotations** tab of the right panel. Clicking a row also moves the view to it.
+- **Select**: click a pin or shape with the Pan tool, or click its row in the **Annotations** tab of the right panel. Clicking a row also moves the view to it. **⇧-click** selects several.
 - **Rename**: double-click the pin, or its row in the list, or select it and press **↵**. Type the new title and press **↵** (**Esc** keeps the old one).
-- **Notes**: the list has a details field for each annotation if you want to write more than a title. NDP.view2 shows it as the annotation's details.
-- **Colour**: choose a colour for the selection from its menu (right-click it). New pins use the colour in **Preferences ▸ Annotations**, green by default. NDP.view2 has a fixed set of pin colours, so a pin's colour is matched to the nearest one of those.
+- **Move**: drag a pin, or the outline of a shape. Once a shape is selected you can also drag it from the inside.
+- **Reshape**: select it, then drag the white squares: the ends of a ruler, the corners of a rectangle, the points of an outline, or the square on a circle's edge for its size.
+- **Colour**: right-click it, or click the colour dot in the list. New pins use the colour in **Preferences ▸ Pins & shapes**, green by default. NDP.view2 has a fixed set of pin colours, so a pin's colour is matched to the nearest one of those.
 - **Delete**: select it and press **Delete** (or **⌫**), or right-click it and choose **Delete**.
-- **Undo** with **⌘Z** and **redo** with **⇧⌘Z** (Ctrl+Z and Ctrl+Y on Windows). Undo works for placing, moving, renaming and deleting.
+- **Undo** with **⌘Z** and **redo** with **⇧⌘Z** (Ctrl+Z and Ctrl+Y on Windows). Undo works for placing, moving, reshaping, renaming and deleting.
+
+### The annotation list
+
+The **Annotations** tab in the right-hand panel lists everything on the slide, with each ruler's length.
+
+- Click a row to select it and go to it on the slide.
+- The eye hides it from view. That isn't saved, and NDP.view2 still shows it.
+- The selected row has a **Notes** box, saved with the annotation. NDP.view2 shows these as the annotation's details.
+- If two annotations have the same title, a warning appears. That's fine for notes, but for an exam each question should have one pin.
 
 ## Exam answers
 
@@ -57,6 +67,7 @@ There's no Save button. A second after each change, the annotations for the slid
 
 - Each save keeps the previous version next to it as `VMS104.ndpi.ndpa.bak`, in case you need to go back.
 - If the slide's folder can't be written to (a read-only course drive, for example), the file goes to the app's own data folder instead and the panel says so. Use **Export Annotations (.ndpa)…** to get a copy.
+- If an `.ndpa` file can't be read, the panel says so, and the app won't overwrite it.
 - An `.ndpa` file you were given (by your instructor, or saved from NDP.view2) opens with the slide automatically when it has the matching name. Everything in it is shown, and anything Slide Viewer doesn't understand is kept unchanged when it saves.
 
 ## Working with NDP.view2

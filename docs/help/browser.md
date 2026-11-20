@@ -1,7 +1,7 @@
 ---
-title: Browsing a folder of slides
+title: The slide browser
 blurb: Choosing a folder, the slide list, searching, and moving from slide to slide.
-order: 2
+order: 1.5
 ---
 
 # Browsing a folder of slides

@@ -26,7 +26,7 @@ The full user guide is in [docs/help](docs/help/index.md); the same pages are bu
   ([file formats](docs/help/file-formats.md))
 - Pick a parent folder: a collapsible tree of its subfolders with a thumbnail per slide, search by name,
   a badge on slides that have annotations, and **[ ]** to step through them
-  ([getting started](docs/help/getting-started.md))
+  ([getting started](docs/help/getting-started.md), [the slide browser](docs/help/browser.md))
 - Overview map, scale bar, 1.25×–40× zoom presets, view rotation, focal planes (z-stacks) and PNG
   snapshots ([viewing](docs/help/viewing.md))
 - Pins with free-text titles, rulers, freehand outlines, circles and rectangles, with undo/redo and an

@@ -99,7 +99,8 @@ export async function renderSnapshot(
       src.height = bmp.height;
       src.getContext("2d")!.drawImage(bmp, 0, 0);
       bmp.close();
-      if (st.filters.enabled) src = applyFiltersToCanvas(src);
+      // sharpen radius is in CSS px; this canvas has `s` pixels per CSS px
+      if (st.filters.enabled) src = applyFiltersToCanvas(src, { pxScale: s });
       ctx.save();
       ctx.setTransform(a * s, b * s, c * s, d * s, o.x * s, o.y * s);
       ctx.imageSmoothingQuality = "high";
@@ -131,7 +132,7 @@ export async function renderSnapshot(
     paintAnnotations(ctx, coords, st.annotations.items, {
       selection: new Set(),
       showTitles: useSettings.getState().s.annotations.showTitles,
-      scale: s,
+      // no `scale`: the transform above already maps CSS px to output px (paintAnnotations would scale again)
     });
     ctx.restore();
   }
@@ -246,7 +247,7 @@ export function Snapshot() {
   };
 
   return (
-    <Modal className="sv-snapshot" onClose={() => !busy && setOpen(false)} help="viewer">
+    <Modal className="sv-snapshot" onClose={() => !busy && setOpen(false)} help="viewing/snapshot">
       <h2>Save view as PNG</h2>
       <p className="help">The visible part of the slide, with the current adjustments{o.annotations ? " and annotations" : ""}.</p>
       <div className="rows">

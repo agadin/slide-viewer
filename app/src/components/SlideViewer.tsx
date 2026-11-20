@@ -159,9 +159,47 @@ export function SlideViewer() {
       useStore.getState().setUi({ toast: { text: `Could not show the slide: ${e.message ?? "unknown error"}`, kind: "error" } });
     });
 
+    // integration: right- or middle-button drag pans with every tool (help: viewing/zoom-and-pan)
+    let rdrag: { x: number; y: number; moved: boolean } | null = null;
+    const onRMove = (e: PointerEvent) => {
+      if (!rdrag) return;
+      const dx = e.clientX - rdrag.x;
+      const dy = e.clientY - rdrag.y;
+      if (!rdrag.moved && Math.hypot(dx, dy) < 4) return;
+      rdrag.moved = true;
+      rdrag.x = e.clientX;
+      rdrag.y = e.clientY;
+      v.viewport.panBy(v.viewport.deltaPointsFromPixels(new OpenSeadragon.Point(-dx, -dy), true), true);
+      v.viewport.applyConstraints();
+    };
+    const onRUp = () => {
+      window.removeEventListener("pointermove", onRMove);
+      window.removeEventListener("pointerup", onRUp);
+      // swallow the context menu a right-drag would open on release (Windows)
+      if (rdrag?.moved) setTimeout(() => (rdrag = null), 0);
+      else rdrag = null;
+    };
+    const onRDown = (e: PointerEvent) => {
+      if (e.pointerType !== "mouse" || (e.button !== 2 && e.button !== 1)) return;
+      rdrag = { x: e.clientX, y: e.clientY, moved: false };
+      window.addEventListener("pointermove", onRMove);
+      window.addEventListener("pointerup", onRUp);
+    };
+    const onRContext = (e: MouseEvent) => {
+      if (rdrag?.moved) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    host.addEventListener("pointerdown", onRDown, true);
+    host.addEventListener("contextmenu", onRContext, true);
+
     setViewer(v);
     setActiveViewer(v, info);
     return () => {
+      host.removeEventListener("pointerdown", onRDown, true);
+      host.removeEventListener("contextmenu", onRContext, true);
+      onRUp();
       cancelAnimationFrame(raf);
       setActiveViewer(null, null);
       setViewer(null);

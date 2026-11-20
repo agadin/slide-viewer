@@ -1,47 +1,96 @@
 ---
 title: Viewing a slide
-blurb: Zoom and pan, the overview map, magnification, rotation, focal planes and snapshots.
+blurb: Zoom and pan, the toolbar, the overview map, magnification, rotation, focal planes and snapshots.
 order: 2
 ---
 
 # Viewing a slide
 
+Pick a slide in the [slide browser](browser.md) on the left and it opens in the middle of the window.
+
 ## Zoom and pan
 
-- **Zoom**: scroll the mouse wheel, or pinch on a trackpad. Zooming centres on the pointer, so point at what you want to see more closely. Double-click also zooms in (it can be turned off in Preferences).
-- **Pan**: drag the slide with the **Pan** tool (**V**). With another tool chosen, you can still pan by dragging with the right mouse button or by scrolling with two fingers on a trackpad.
+- **Zoom**: scroll the mouse wheel, or pinch on a trackpad. Zooming centres on the pointer, so point at what you want to see more closely. Double-click also zooms in (turn that off in **Preferences ▸ Viewing**).
+- **Pan**: drag the slide with the **Pan** tool (**V**). With another tool chosen, you can still pan by dragging with the right mouse button or by scrolling with two fingers on a trackpad. **⇧** with an arrow key pans a quarter of a screen.
 - **Whole slide**: press **H** or **0**, or choose **View ▸ Zoom to Fit** (**⌘0**), to see the whole slide again.
 
 Tiles load as you move: a blurry patch sharpens a moment later. The first view of a slide on a network drive can take a few seconds.
 
+## The toolbar
+
+The pill at the bottom of the slide holds the tools and view controls.
+
+| Button | Key | What it does |
+| --- | --- | --- |
+| Pan | **V** | Drag to move around. Clicking an annotation selects it. |
+| Pin | **P** | Click to drop a named pin. |
+| Ruler | **R** | Drag to measure. |
+| Freehand | **F** | Draw an outline. |
+| Circle | **C** | Drag out a circle. |
+| Rectangle | **B** | Drag out a rectangle. |
+| Undo / Redo | **⌘Z** / **⌘⇧Z** | Undo or redo the last annotation change. |
+| Rotate | **,** / **.** | Turn the view 90° left or right. |
+| Zoom | **−** / **0** / **+** | Zoom out, fit the whole slide, zoom in. |
+| Camera | **⇧S** | Save the view as a PNG (see [Snapshot](#snapshot)). |
+
+**Esc** cancels a drawing, then clears the selection, then returns to Pan. **Delete** removes the selected annotations. See [Pins and shapes](annotating.md) for the drawing tools.
+
 ## The overview map
 
-The small map in a corner shows the whole slide, with a box around the part you're looking at. Click or drag in the map to jump there. Turn it off in **Preferences ▸ Viewer** if you want the space.
+The card in the top-left corner shows the whole slide, turned the same way as your view. The orange box is what you can see. **Click** or **drag** on the map to move there; **scroll** on it to zoom. Pins show as small dots. Hide it in **Preferences ▸ Viewing** if you want the space.
 
 ## Magnification and zoom presets
 
-The zoom buttons over the slide jump to the magnifications you know from the microscope: **1.25×, 2.5×, 5×, 10×, 20×** and **40×**. The current magnification is shown next to them.
+The card in the top-right shows the current magnification and buttons for **Fit, 1.25×, 2.5×, 5×, 10×, 20×** and **40×**, the magnifications you know from the microscope.
 
-Magnification on a screen is an approximation. Slide Viewer uses the same rule as NDP.view2: **10× means 1 µm per screen pixel**, so 40× is 0.25 µm per pixel. A slide can't be zoomed past the resolution it was scanned at by much before it turns blocky; most course slides are scanned at 20× or 40×.
+Magnification on a screen is an approximation. Slide Viewer uses the same rule as NDP.view2: **10× means 1 µm per screen pixel**, so 40× is 0.25 µm per pixel.
+
+A slide scanned with a 20× objective has no more detail than 20×. Presets above the scan's own magnification are shown dimmer: they only enlarge the pixels (digital zoom). Presets the slide can't reach are hidden. Hover the readout to see the scan's magnification and pixel size.
+
+Images without a pixel size (plain JPEG or PNG files, some TIFFs) are marked **uncalibrated**. For those, the presets are percentages of the image's own pixels (100% = one image pixel per screen pixel). See [Uncalibrated slides](measuring.md#uncalibrated-slides).
 
 ## Scale bar
 
-The scale bar in the bottom corner always shows a round length (for example **100 µm** or **1 mm**) at the current zoom. Use it to judge sizes at a glance; for an exact length use the [ruler](measuring.md#the-ruler). If the slide has no size information, the bar shows pixels instead (see [Uncalibrated slides](measuring.md#uncalibrated-slides)).
+The bar in the bottom-left corner shows a round length (1, 2 or 5 × 10ⁿ µm or mm, for example **100 µm** or **1 mm**) and follows the zoom as you move. Use it to judge sizes at a glance; for an exact length use the [ruler](measuring.md#the-ruler). On an uncalibrated image it shows pixels.
 
 ## Rotate
 
-Sections aren't always scanned the way up you'd like. Choose **View ▸ Rotate Left** or **View ▸ Rotate Right** to turn the view by 90°. Rotation only changes how you see the slide: pins, shapes and measurements stay where they are on the tissue, and the saved `.ndpa` file is unchanged. Opening another slide resets the rotation.
+Sections aren't always scanned the way up you'd like. Rotating only turns your view: the slide and your annotations keep their coordinates, so pins placed while rotated open in the right place in NDP.view2 and in your instructor's grading tools.
+
+- **,** and **.** (or the toolbar's arrow buttons, or **View ▸ Rotate Left / Right**) turn 90°.
+- **⇧,** and **⇧.**, or **Shift-click** on the arrow buttons, turn by a small step (15° by default; change it in **Preferences ▸ Viewing**).
+- Click the **angle** between the arrows for a slider that turns the view freely, and **Reset** to go back to 0°.
 
 ## Focal planes
 
-Some slides are scanned at several focus depths (a *z-stack*), so you can focus up and down through a thick section as you would on a microscope. When the open slide has more than one plane, a focus slider appears at the side of the slide: drag it, or click its steps, to change plane. Pins and shapes stay on every plane.
+Some slides are scanned at several focus depths (a *z-stack*), so you can focus up and down through a thick section as you would with the fine-focus knob. Hamamatsu `.ndpi` and Zeiss `.czi` z-stacks are supported. When the open slide has more than one plane, a slider appears on the right edge of the slide. Drag it, click ▲ / ▼, or press **Page Up** / **Page Down**. The slide opens at the in-focus plane (0 µm). The new plane fades in over the old one, so the view never goes blank. Pins and shapes belong to the slide, not to a plane, so they stay where they are.
 
-Which slides have focal planes depends on the file format: Zeiss `.czi` files with z-stacks do. For other formats, only the main plane is shown and the slider stays hidden. See [File formats](file-formats.md).
+Slides with a single plane don't show the slider.
 
 ## Snapshot
 
-To save what you see as a picture (for notes or a report), choose **File ▸ Save Snapshot (PNG)…** (**⇧⌘S**, Ctrl+Shift+S). The snapshot is the current view with your adjustments applied, and includes your pins and shapes with their titles. Choose where to save it.
+To save what you see as a picture (for notes or a report), press **⇧⌘S** or **⇧S**, click the camera button, or choose **File ▸ Save Snapshot (PNG)…**.
+
+- **Resolution**: 1×, 2× or 4× the size of the view on screen. The picture is rendered fresh from the slide, so 2× and 4× are sharper, not just bigger.
+- **Annotations**: draw your pins and shapes, with their titles, on the picture.
+- **Scale bar**: burn a scale bar into the bottom-left corner.
+- **Title**: a title in the top-left corner (the slide name by default), with the magnification.
+
+The picture uses your current [adjustments](adjustments-and-stains.md) and rotation. Choose where to save it in the dialog that follows.
 
 ## Moving between slides
 
-**]** or **→** opens the next slide in the browser list and **[** or **←** the previous one. Your annotations on the slide you leave are saved first. The search box in the browser limits which slides you step through.
+**]** or **→** opens the next slide in the browser list and **[** or **←** the previous one. Your annotations on the slide you leave are saved first. When you're searching in the browser, these keys step only through the matches. The app tells you when you reach the first or last slide.
+
+## Keyboard
+
+| Key | Action |
+| --- | --- |
+| **[** / **]** or **←** / **→** | Previous / next slide |
+| **⇧←** **⇧→** **⇧↑** **⇧↓** | Pan a quarter screen |
+| **+** / **−** | Zoom in / out |
+| **0**, **H** or **⌘0** | Fit the whole slide |
+| **,** / **.** | Rotate 90° left / right |
+| **⇧,** / **⇧.** | Rotate by the small step |
+| **Page Up** / **Page Down** | Focal plane up / down |
+| **⇧S** or **⇧⌘S** | Save a snapshot |

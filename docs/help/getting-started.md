@@ -30,6 +30,8 @@ The browser on the left shows what was found, laid out like the folder on disk:
 - **A badge** on a slide means it already has annotations: you placed pins on it, or someone gave you an `.ndpa` file for it.
 - **Search**: type in the box at the top to show only slides whose name contains what you typed, for example `104` or `liver`.
 
+For everything the browser can do (keyboard, right-click menus, what's listed and what's skipped), see [The slide browser](browser.md).
+
 Click a slide to open it. Press **]** or **→** for the next slide in the list and **[** or **←** for the previous one, so you can flip through a block without touching the mouse.
 
 Added or renamed slides while the app was open? Choose **File ▸ Rescan Folder** (**⌘R**).

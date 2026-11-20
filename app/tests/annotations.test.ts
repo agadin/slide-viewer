@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { JSDOM } from "jsdom";
 import { dataDir, eq, near, ok, test } from "./harness";
-import { anchorOf, emptyNdpa, loadNdpa, nearestPinColor, nextNdpaId, serializeNdpa, type NdpaDocument } from "../src/lib/ndpa";
+import { anchorOf, emptyNdpa, loadNdpa, nearestPinColor, nextNdpaId, normColor, serializeNdpa, type NdpaDocument } from "../src/lib/ndpa";
 import {
   addAnnotation,
   defaultTitle,
@@ -226,8 +226,26 @@ test("ndpa: test files read the same as MSG's reader", () => {
       msg.map((m) => [m.title, m.details, m.type, m.xNm, m.yNm]),
       `${f}: same titles, details and coordinates`,
     );
-    ok(ours.every((a) => a.kind === "pin" && a.color === "#00ff00"), `${f}: green pins`);
+    // every <annotation color="…"> comes through as the item's colour (pingreen pins, flagred pins, shapes)
+    const colours = [...x.matchAll(/<annotation\b[^>]*\bcolor="([^"]+)"/g)].map((m) => normColor(m[1]));
+    eq(ours.map((a) => a.color), colours, `${f}: colours as in the file`);
   }
+});
+
+// integration: a real NDP.view2 export with a closed freehand outline and red flag pins (test-data/VMS105-shapes)
+test("ndpa: real NDP.view2 file with shapes", () => {
+  const f = files().find((p) => p.endsWith("VMS105-shapes.ndpi.ndpa"));
+  if (!f) return;
+  const x = read(f);
+  const { doc, items } = loadNdpa(x);
+  eq(items.map((a) => a.kind), ["pin", "pin", "pin", "pin", "pin", "freehand"], "five pins and one outline");
+  const fh = items[5];
+  ok(fh.closed === true && fh.points.length > 50, `closed freehand with ${fh.points.length} points`);
+  eq(fh.color, "#00ff00", "freehand colour");
+  ok(items.slice(0, 5).every((a) => a.color === "#ff0000"), "red flag pins");
+  // renaming the outline rewrites only its title; the flag icons and point list stay byte for byte
+  const out = serializeNdpa(doc, items.map((a, i) => (i === 5 ? { ...a, title: "renamed" } : a)));
+  eq(out, x.replace("<title>secretory elements</title>", "<title>renamed</title>"), "rename keeps everything else");
 });
 
 test("ndpa: shapes and unknown XML", () => {

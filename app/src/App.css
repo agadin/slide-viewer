@@ -1768,44 +1768,6 @@ body.drag-sorting * {
 .sv-toast.error {
   color: var(--bad);
 }
-/* placeholders while features are being built */
-.stub {
-  padding: 14px;
-}
-.panel-stub {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.browser-stub {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-height: 0;
-  overflow: auto;
-}
-.browser-stub .row {
-  display: flex;
-  gap: 6px;
-}
-.stub-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.stub-list li {
-  padding: 4px 8px;
-  border-radius: 6px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.stub-list li:hover {
-  background: var(--fill-1);
-}
-.stub-list li.on {
-  background: var(--accent-soft);
-}
 /* ============================ end slide viewer shell ============================ */
 
 /* ---------- feature additions: append below, one delimited block per builder ---------- */
