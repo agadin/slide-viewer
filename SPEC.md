@@ -68,6 +68,16 @@ Format, as written by NDP.view2:
   - freehand/polygon: `type="freehand" displayname="AnnotateFreehand"`, `<measuretype>0</measuretype><closed>1</closed><pointlist><point><x/><y/></point>…</pointlist>`
   - rectangle: `type="freehand" displayname="AnnotateRectangle"`, `<specialtype>rectangle</specialtype>`, 4-point pointlist, closed
   - ruler/line: `type="linear" displayname="AnnotateRuler"` (or `AnnotateLine`), 2-point `<pointlist>`, with `<measuretype>1</measuretype>` for rulers
+- **Verified against real NDP.view2 exports** (test-data/VMS104-shapes and VMS105-shapes, 2026-11-20), which
+  supersede the guesses above where they differ:
+  - circle: `<x> <y> <radius>` then `<measuretype>0</measuretype>`
+  - freehand: `type="freehand" displayname="AnnotateFreehand"`, `<measuretype>0</measuretype><closed>1</closed><pointlist>`;
+    an open line is `displayname="AnnotateFreehandLine"` with `<closed>0</closed>`
+  - rectangle: as above, with `displayname="AnnotateRectangle"` and `<specialtype>rectangle</specialtype>` after the pointlist
+  - ruler: `type="linearmeasure" displayname="AnnotateRuler"` with `<x1> <y1> <x2> <y2>` (no pointlist, no measuretype)
+  - arrow: `type="pointer" displayname="AnnotatePointer"` with `<x1>..<y2>`
+  - pins can also use flag icons (`<icon>flagred</icon><stricon>iconflagred</stricon>`)
+  - MSG's `parseNdpa` skips x1..y2 geometry, so it does not see rulers or arrows (from either app).
 - **Round-trip preservation:** parse into a DOM. Keep each annotation's original `ndpviewstate`
   node and mutate only the fields we edit. Unknown elements and attributes, and their order, must survive.
   The test is that parse → serialize with no edits gives semantically identical XML for every file in `test-data/`.

@@ -12,6 +12,7 @@ import { useStore } from "../lib/store";
 import { useSettings } from "../lib/settings";
 import { openEntry, openFolder } from "../lib/browser";
 import { readText, writeText } from "../lib/backend";
+import { getActiveViewer } from "../components/viewer/viewerHandle";
 
 const dir = new URLSearchParams(location.search).get("smoke")!;
 const report: Record<string, unknown> = { started: new Date().toISOString(), stages: [] as string[] };
@@ -41,6 +42,25 @@ function pointer(el: Element, type: string, x: number, y: number) {
   );
 }
 
+/** what OpenSeadragon has drawn: a black viewport in a screenshot is told apart from a hidden window here */
+function viewerState() {
+  const v = getActiveViewer()?.viewer as unknown as {
+    world: { getItemCount(): number; getItemAt(i: number): { getFullyLoaded?: () => boolean } };
+    viewport: { getZoom(c: boolean): number };
+    container: HTMLElement;
+  } | null;
+  const item = v && v.world.getItemCount() ? v.world.getItemAt(0) : null;
+  return {
+    items: v?.world.getItemCount() ?? 0,
+    fullyLoaded: item?.getFullyLoaded?.() ?? null,
+    zoom: v?.viewport.getZoom(true) ?? null,
+    container: v ? [v.container.clientWidth, v.container.clientHeight] : null,
+    magnification: st().view.magnification,
+    visibility: document.visibilityState,
+    focused: document.hasFocus(),
+  };
+}
+
 async function run() {
   await sleep(1500);
   await openFolder(dir);
@@ -56,6 +76,7 @@ async function run() {
   const before = st().annotations.items.map((a) => ({ kind: a.kind, title: a.title }));
   report.loadedAnnotations = before;
   await stage("slide-open", 4000);
+  report.viewer = viewerState();
 
   // place a pin with the pin tool at the centre of the slide
   st().setTool("pin");

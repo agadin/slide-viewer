@@ -289,7 +289,9 @@ export const pinIcon = (hex: string) => `pin${nearestPinColor(hex).name}`;
 
 // ---------------------------------------------------------------- reading
 
-const LINEAR = new Set(["linear", "linearmeasure", "line", "ruler", "arrow"]);
+const LINEAR = new Set(["linear", "linearmeasure", "line", "ruler", "arrow", "pointer"]);
+/** two-point annotations that are not measurements (NDP.view2 writes type="pointer" displayname="AnnotatePointer") */
+const ARROWS = new Set(["arrow", "pointer"]);
 const AREA = new Set(["freehand", "polygon", "rectangle", "polyline"]);
 
 function pointsOf(ann: Element): PtNm[] | null {
@@ -333,10 +335,10 @@ function readAnnotation(vs: Element, ann: Element): Omit<Annotation, "id" | "ndp
   } else if (LINEAR.has(t)) {
     const x1 = numOf(child(ann, "x1")), y1 = numOf(child(ann, "y1")), x2 = numOf(child(ann, "x2")), y2 = numOf(child(ann, "y2"));
     const ends = fin(x1, y1, x2, y2) ? [{ x: x1, y: y1 }, { x: x2, y: y2 }] : null;
-    if (t !== "arrow" && pts && pts.length === 2) {
+    if (!ARROWS.has(t) && pts && pts.length === 2) {
       kind = "ruler";
       points = pts;
-    } else if (t !== "arrow" && !pts && ends) {
+    } else if (!ARROWS.has(t) && !pts && ends) {
       kind = "ruler";
       points = ends;
     } else points = pts?.length ? pts : ends;
@@ -502,9 +504,14 @@ function annotationSpec(a: Annotation): Spec {
       return ["annotation", { type: "pin", displayname: "AnnotatePin", color }, [["x", {}, fmtNm(p0.x)], ["y", {}, fmtNm(p0.y)], ["icon", {}, icon], ["stricon", {}, `icon${icon}`]]];
     }
     case "circle":
-      return ["annotation", { type: "circle", displayname: "AnnotateCircle", color }, [["x", {}, fmtNm(p0.x)], ["y", {}, fmtNm(p0.y)], ["radius", {}, fmtNm(a.radiusNm ?? 0)], ["measuretype", {}, "3"]]];
+      return ["annotation", { type: "circle", displayname: "AnnotateCircle", color }, [["x", {}, fmtNm(p0.x)], ["y", {}, fmtNm(p0.y)], ["radius", {}, fmtNm(a.radiusNm ?? 0)], ["measuretype", {}, "0"]]];
     case "ruler":
-      return ["annotation", { type: "linear", displayname: "AnnotateRuler", color }, [["measuretype", {}, "1"], ["pointlist", {}, ptsSpec(a.points)]]];
+      // as NDP.view2 writes it (checked against a real export): type="linearmeasure", end points as x1/y1/x2/y2
+      return [
+        "annotation",
+        { type: "linearmeasure", displayname: "AnnotateRuler", color },
+        [["x1", {}, fmtNm(p0.x)], ["y1", {}, fmtNm(p0.y)], ["x2", {}, fmtNm(a.points[1].x)], ["y2", {}, fmtNm(a.points[1].y)]],
+      ];
     case "rectangle":
       return [
         "annotation",
@@ -512,7 +519,12 @@ function annotationSpec(a: Annotation): Spec {
         [["measuretype", {}, "0"], ["closed", {}, "1"], ["pointlist", {}, ptsSpec(a.points)], ["specialtype", {}, "rectangle"]],
       ];
     case "freehand":
-      return ["annotation", { type: "freehand", displayname: "AnnotateFreehand", color }, [["measuretype", {}, "0"], ["closed", {}, a.closed === false ? "0" : "1"], ["pointlist", {}, ptsSpec(a.points)]]];
+      // an open line is "AnnotateFreehandLine" in NDP.view2
+      return [
+        "annotation",
+        { type: "freehand", displayname: a.closed === false ? "AnnotateFreehandLine" : "AnnotateFreehand", color },
+        [["measuretype", {}, "0"], ["closed", {}, a.closed === false ? "0" : "1"], ["pointlist", {}, ptsSpec(a.points)]],
+      ];
     default:
       return ["annotation", { type: a.ndpType ?? "freehand", displayname: a.displayName ?? "AnnotateFreehand", color }, [["closed", {}, "0"], ["pointlist", {}, ptsSpec(a.points)]]];
   }

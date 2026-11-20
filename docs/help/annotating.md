@@ -72,4 +72,4 @@ There's no Save button. A second after each change, the annotations for the slid
 
 ## Working with NDP.view2
 
-Files go both ways. NDP.view2 opens annotations made here, and Slide Viewer opens annotations made in NDP.view2: pins, rulers, freehand outlines, circles and rectangles. Positions are stored in nanometres from the centre of the glass slide, as NDP.view2 does, so a pin lands on the same cell in both programs.
+Files go both ways. NDP.view2 opens annotations made here, and Slide Viewer opens annotations made in NDP.view2: pins, rulers, freehand outlines, circles and rectangles. Open freehand lines and arrows from NDP.view2 are shown too; arrows can be renamed, recoloured and deleted but not moved. Positions are stored in nanometres from the centre of the glass slide, as NDP.view2 does, so a pin lands on the same cell in both programs.

@@ -219,7 +219,10 @@ test("ndpa: every NDP.view2 test file round-trips byte for byte", () => {
 test("ndpa: test files read the same as MSG's reader", () => {
   for (const f of files()) {
     const x = read(f);
-    const ours = loadNdpa(x).items;
+    // MSG's reader only knows <x>/<y> and <pointlist> geometry, so it skips NDP.view2's rulers
+    // (type="linearmeasure") and arrows (type="pointer"), which store x1/y1/x2/y2. That's fine for grading.
+    const all = loadNdpa(x).items;
+    const ours = all.filter((a) => !["linearmeasure", "pointer", "arrow"].includes((a.ndpType ?? "").toLowerCase()));
     const msg = msgParseNdpa(x);
     eq(
       ours.map((a) => [a.title, a.details, a.ndpType, anchorOf(a).x, anchorOf(a).y]),
@@ -228,7 +231,7 @@ test("ndpa: test files read the same as MSG's reader", () => {
     );
     // every <annotation color="…"> comes through as the item's colour (pingreen pins, flagred pins, shapes)
     const colours = [...x.matchAll(/<annotation\b[^>]*\bcolor="([^"]+)"/g)].map((m) => normColor(m[1]));
-    eq(ours.map((a) => a.color), colours, `${f}: colours as in the file`);
+    eq(all.map((a) => a.color), colours, `${f}: colours as in the file`);
   }
 });
 
@@ -321,18 +324,20 @@ test("ndpa: new annotations are NDP.view-formatted and MSG-compatible", () => {
   ok(out.endsWith("</annotations>\n\n"), "NDP.view's trailing newlines");
   ok(out.includes('\t<ndpviewstate id="' + items[base.items.length].ndpaId + '">\n\t\t<title>Q7</title>\n\t\t<details/>\n\t\t<coordformat>nanometers</coordformat>\n\t\t<lens>12.500000</lens>'), "new pin's viewstate header");
   ok(out.includes('<annotation type="pin" displayname="AnnotatePin" color="#00ff00">\n\t\t\t<x>1234</x>\n\t\t\t<y>-5679</y>\n\t\t\t<icon>pingreen</icon>\n\t\t\t<stricon>iconpingreen</stricon>\n\t\t</annotation>'), "pin body like NDP.view's");
-  ok(out.includes('type="linear" displayname="AnnotateRuler"') && out.includes("<measuretype>1</measuretype>"), "ruler as a linear annotation");
+  ok(out.includes('<annotation type="linearmeasure" displayname="AnnotateRuler" color="#00ff00">\n\t\t\t<x1>0</x1>\n\t\t\t<y1>0</y1>\n\t\t\t<x2>3000</x2>\n\t\t\t<y2>4000</y2>\n\t\t</annotation>'), "ruler as NDP.view2 writes it (linearmeasure, x1..y2)");
   ok(out.includes('type="circle" displayname="AnnotateCircle"') && out.includes("<radius>70</radius>"), "circle");
   ok(out.includes('displayname="AnnotateRectangle" color="#ff00ff"') && out.includes("<specialtype>rectangle</specialtype>"), "rectangle");
   // MSG reads the same titles and coordinates
   const msg = msgParseNdpa(out);
-  eq(msg.length, items.length, "MSG sees every annotation");
+  // MSG skips x1..y2 geometry (rulers, arrows), as it does for NDP.view2's own rulers; a ruler is never an answer
+  const msgSees = items.filter((a) => a.kind !== "ruler" && !["pointer", "arrow"].includes((a.ndpType ?? "").toLowerCase()));
+  eq(msg.length, msgSees.length, "MSG sees every annotation except rulers and arrows");
   eq(
     msg.map((m) => [m.title, Math.round(m.xNm * 1000) / 1000, Math.round(m.yNm * 1000) / 1000]),
-    items.map((a) => [a.title, Math.round(anchorOf(a).x * 1000) / 1000, Math.round(anchorOf(a).y * 1000) / 1000]),
+    msgSees.map((a) => [a.title, Math.round(anchorOf(a).x * 1000) / 1000, Math.round(anchorOf(a).y * 1000) / 1000]),
     "MSG: same titles and coordinates",
   );
-  eq(msg.map((m) => m.type).slice(base.items.length), ["pin", "linear", "freehand", "circle", "freehand"], "MSG: types (a ruler isn't an answer by default)");
+  eq(msg.map((m) => m.type).slice(-4), ["pin", "freehand", "circle", "freehand"], "MSG: types of the new pin and shapes");
   // and re-opening gives the same annotations
   const back = loadNdpa(out).items;
   eq(
@@ -436,4 +441,30 @@ test("autosave: where to read and write", () => {
   eq(choosePaths({ ...p, primaryExists: false, primaryWritable: true, fallbackExists: false }), { read: null, write: p.primary, fallback: false }, "no file yet");
   eq(choosePaths({ ...p, primaryExists: true, primaryWritable: false, fallbackExists: false }), { read: p.primary, write: p.fallback, fallback: true }, "read-only: start from the slide's file");
   eq(choosePaths({ ...p, primaryExists: true, primaryWritable: false, fallbackExists: true }), { read: p.fallback, write: p.fallback, fallback: true }, "read-only: our saved copy wins");
+});
+
+// integration: a real NDP.view2 export with one of every shape (test-data/VMS104-shapes, drawn by the user in NDP.view2)
+test("ndpa: real NDP.view2 file with every shape type", () => {
+  const f = files().find((p) => p.endsWith("VMS104-shapes.ndpi.ndpa"));
+  if (!f) return;
+  const x = read(f);
+  const { doc, items } = loadNdpa(x);
+  eq(items.map((a) => a.title), ["circle", "free hand", "ruler", "rectangle", "pointer", "free hand line"], "titles");
+  eq(items.map((a) => a.kind), ["circle", "freehand", "ruler", "rectangle", "other", "freehand"], "kinds");
+  eq(items.map((a) => a.closed ?? null), [null, true, null, true, null, false], "closed flags");
+  eq(items[2].points, [{ x: 4944917, y: -1137096 }, { x: 5283609, y: -1137096 }], "ruler ends from x1..y2");
+  eq(items[4].points.length, 2, "pointer (arrow) end points kept for drawing");
+  eq(serializeNdpa(doc, items), x, "round trip is byte-identical");
+  // moving the ruler writes x1..y2 in place
+  const moved = items.map((a, i) => (i === 2 ? { ...a, points: a.points.map((p) => ({ x: p.x + 10, y: p.y })) } : a));
+  const out = serializeNdpa(doc, moved);
+  ok(out.includes("<x1>4944927</x1>") && out.includes("<x2>5283619</x2>") && !/linearmeasure[^]*?<pointlist>[^]*?<\/annotation>\s*<\/ndpviewstate>\s*<ndpviewstate id="4"/.test(out), "moved ruler keeps NDP.view2's x1..y2 form");
+  // a new ruler and an open line are written the way NDP.view2 writes these
+  const r = makeAnnotation("ruler", [{ x: 1, y: 2 }, { x: 3, y: 4 }], { color: "#00ff00", items, doc });
+  const l = makeAnnotation("freehand", [{ x: 0, y: 0 }, { x: 5, y: 5 }], { color: "#00ff00", items: [...items, r], doc, closed: false });
+  const added = serializeNdpa(doc, [...items, r, l]);
+  ok(added.includes('<annotation type="linearmeasure" displayname="AnnotateRuler" color="#00ff00">\n\t\t\t<x1>1</x1>'), "new ruler like NDP.view2's");
+  ok(added.includes('<annotation type="freehand" displayname="AnnotateFreehandLine" color="#00ff00">\n\t\t\t<measuretype>0</measuretype>\n\t\t\t<closed>0</closed>'), "new open line like NDP.view2's");
+  const again = loadNdpa(added).items;
+  eq(again.slice(-2).map((a) => [a.kind, a.closed ?? null]), [["ruler", null], ["freehand", false]], "both read back");
 });
