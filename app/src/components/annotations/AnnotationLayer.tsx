@@ -361,6 +361,8 @@ export function AnnotationLayer() {
         finishPoly();
         return;
       }
+      // drawing tools never double-click-zoom (it would fire while placing pins / points)
+      if (st().annotations.tool !== "pan") e.preventDefaultAction = true;
       const h = hit(pos(e));
       if (h) {
         e.preventDefaultAction = true;

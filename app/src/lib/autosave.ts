@@ -62,7 +62,10 @@ async function load(slidePath: string) {
   }
   if (useStore.getState().slide.path !== slidePath) return; // another slide was opened meanwhile
   ctx = { slidePath, fallback: paths.fallback, usingFallback: fallback, blocked };
-  if (fallback) useAnnUi.setState({ notice: READ_ONLY_NOTICE });
+  if (fallback) {
+    useAnnUi.setState({ notice: READ_ONLY_NOTICE });
+    useStore.getState().setUi({ toast: { text: "Read-only folder: annotations are saved in the app's data folder.", kind: "info" } });
+  }
   const a = useStore.getState().annotations;
   // anything drawn while the file was loading is kept (appended)
   useStore.getState().setAnnotations({ items: [...items, ...a.items], doc, filePath: write, undo: [], redo: [], save: a.items.length ? "dirty" : "idle", saveError: null });
