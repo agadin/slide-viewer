@@ -83,9 +83,18 @@ export interface FiltersSlice {
   /** false = show the unfiltered image (compare / bypass) */
   enabled: boolean;
   auto: AutoState;
+  // ==== filters: per-slide state ====
+  /** stain / levels analysis of the open slide (null until an Auto action runs) */
+  analysis: StainAnalysis | null;
+  /** filter state of slides opened earlier this session, by slide path (restored when one is reopened) */
+  bySlide: Record<string, { params: FilterParams; auto: AutoState; analysis: StainAnalysis | null }>;
+  // ==== end filters ====
 }
+// ==== filters ====
+import type { StainAnalysis } from "./types";
+// ==== end filters ====
 const initialAuto: AutoState = { status: "idle", error: null, stainType: null, confidence: 0, vectors: null };
-const initialFilters: FiltersSlice = { params: DEFAULT_FILTERS, enabled: true, auto: initialAuto };
+const initialFilters: FiltersSlice = { params: DEFAULT_FILTERS, enabled: true, auto: initialAuto, analysis: null, bySlide: {} };
 
 // ---------------------------------------------------------------- view (owner: viewer)
 export interface ViewSlice {
