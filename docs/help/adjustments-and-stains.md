@@ -16,6 +16,8 @@ Changes apply straight away, and panning and zooming stay smooth because the wor
 
 ## The sliders
 
+![The Adjust tab with gamma and contrast raised](img/adjust-tab.jpg)
+
 | Slider | What it does |
 | --- | --- |
 | **Gamma** | Above 1 brightens the mid-tones, below 1 darkens them, while leaving black and white alone. Raise it to see into dark, dense tissue; lower it to bring out a pale stain. |

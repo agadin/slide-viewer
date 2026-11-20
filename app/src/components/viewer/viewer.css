@@ -35,7 +35,8 @@
   position: absolute;
   z-index: 5;
   left: 12px;
-  bottom: 14px;
+  /* above the floating tool pill (App.css .vtool), which spans the bottom of the viewer */
+  bottom: calc(var(--ledger-h, 0px) + var(--tool-h, 40px) + 3 * var(--gap, 10px));
   padding: 5px 10px 7px;
   border-radius: 10px;
   pointer-events: none;

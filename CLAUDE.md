@@ -47,3 +47,13 @@ Notes:
 
 - Help pages are `docs/help/*.md` with front matter `title`, `blurb`, `order`; they're shown in the app's Help window and on GitHub. When a feature changes, update its page.
 - `npm run test:logic` (tests/release.test.ts) checks that every link, anchor and image in `docs/help` and `README.md` resolves, that the README links every help page, and that every in-app help reference (`data-help="page/anchor"`, `help="…"`, `showHelp("…")`, `helpRef: "…"`) names a real page and heading. Anchors are GitHub-style heading slugs (`## Exam answers` → `annotating/exam-answers`).
+
+## End-to-end smoke run
+
+`tools/smoke.sh <slide> [ndpa] [scratch] [shots]` runs the real app (`tauri dev` on port 1437, so it never
+collides with MSG's dev server on 1420) against a scratch folder holding a symlink to the slide and a copy
+of the `.ndpa`, drives `app/src/dev/smoke.ts` (dev-only, loaded by `?smoke=<folder>`): scan, open, check
+the existing annotations, place a pin with the pin tool, wait for autosave, read the file back, and
+screenshot each stage. It stops only its own process group. Never point it at a folder you must not write
+to; the scratch copy is what gets saved. Never stop dev processes with broad `pkill -f` patterns: MSG may
+be running its own `target/debug/app`.
