@@ -192,3 +192,29 @@ export interface AutoState {
 }
 
 // ---------------------------------------------------------------- feature additions (append below, one delimited block per builder)
+
+// ==== filters: stain analysis (result of lib/filters/stain.ts analyseRgba) ====
+/** What the one-click "Auto" analysis learned from a low-resolution overview of the open slide. */
+export interface StainAnalysis {
+  /** overview size the statistics came from */
+  width: number;
+  height: number;
+  /** fraction of overview pixels classed as tissue (OD threshold) */
+  tissueFraction: number;
+  /** detected stain family and confidence 0..1, plus a sub-label for special stains ("PAS", "trichrome", "silver") */
+  stainType: StainType;
+  confidence: number;
+  subtype: string | null;
+  /** raw per-type scores (he, hdab, special, unknown) before normalising */
+  scores: Record<string, number>;
+  /** Macenko stain vectors (rows: stains; unit OD vectors), ordered like the detected type (haematoxylin first) */
+  vectors: number[][] | null;
+  /** 99th-percentile concentration of each stain (Macenko normalisation) */
+  maxC: number[] | null;
+  /** auto levels from the tissue-only histogram, and a gamma that brings the tissue median to mid-grey */
+  levels: { black: [number, number, number]; white: [number, number, number] } | null;
+  gamma: number;
+  /** estimated glass background per channel 0..1 (Beer–Lambert I0 for optical density); absent = white */
+  background?: [number, number, number] | null;
+}
+// ==== end filters ====
