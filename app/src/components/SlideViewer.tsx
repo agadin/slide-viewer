@@ -120,7 +120,7 @@ export function SlideViewer() {
       minZoomImageRatio: 0.5,
       visibilityRatio: 0.2,
       imageLoaderLimit: 12,
-      maxImageCacheCount: 300,
+      maxImageCacheCount: 256,
       degrees: useStore.getState().view.rotation,
       gestureSettingsMouse: { clickToZoom: false, dblClickToZoom: s.dblClickZoom, scrollToZoom: true },
       zoomPerScroll: s.zoomPerScroll,
@@ -190,6 +190,11 @@ export function SlideViewer() {
       if (done) return;
       done = true;
       clearTimeout(timer);
+      if (shownZ.current !== z) {
+        // a newer plane was asked for meanwhile: drop this one, the newer one cleans up the rest
+        if (world.getIndexOfItem(item) >= 0) world.removeItem(item);
+        return;
+      }
       for (let i = world.getItemCount() - 1; i >= 0; i--) {
         const it = world.getItemAt(i);
         if (it !== item) world.removeItem(it);
