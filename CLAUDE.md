@@ -25,7 +25,8 @@ The GitHub releases page (`agadin/slide-viewer`) is the record of versions. It m
 
 **One-time setup (the user does this, not Claude)**
 
-- Updater key: `npx tauri signer generate -w ~/.tauri/slide-viewer.key`, then put the public key in `app/src-tauri/tauri.conf.json` → `plugins.updater.pubkey` (replacing the `TODO-…` placeholder) and commit it. `tools/release.sh` refuses to run while the placeholder is there. Never generate, move or overwrite this key: losing it breaks updates for every installed copy.
+- Releasing from a Mac needs **cmake** (`brew install cmake`): `release.sh` rebuilds libCZI from source with it. If only CMake 4 is available and libCZI's dependencies complain about an old `cmake_minimum_required`, set `CMAKE_POLICY_VERSION_MINIMUM=3.5`.
+- Updater key (made 2026-11-20; back it up): `npx tauri signer generate -w ~/.tauri/slide-viewer.key`, then put the public key in `app/src-tauri/tauri.conf.json` → `plugins.updater.pubkey` (replacing the `TODO-…` placeholder) and commit it. `tools/release.sh` refuses to run while the placeholder is there. Never generate, move or overwrite this key: losing it breaks updates for every installed copy.
 - Developer ID Application certificate in the keychain and an `xcrun notarytool` keychain profile named `notary` (the same as Micro Speed Grader's).
 
 **Steps**

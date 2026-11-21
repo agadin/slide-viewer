@@ -39,12 +39,15 @@ SHA=$(git -C "$ROOT" rev-parse HEAD)
 
 # Windows: start it now so it builds while macOS notarizes
 if [ -z "${SKIP_WINDOWS:-}" ]; then
+  # remember the runs that already exist, so an older (e.g. cancelled) run for this same commit is never
+  # mistaken for the one started here
+  BEFORE=$(gh run list -R "$REPO" --workflow build.yml --event workflow_dispatch --limit 20 --json databaseId -q '[.[].databaseId|tostring] | join(",")')
   gh workflow run build.yml -R "$REPO" --ref main -f version="$VER"
   RUN=""
-  for _ in $(seq 1 30); do
+  for _ in $(seq 1 45); do
     sleep 4
-    RUN=$(gh run list -R "$REPO" --workflow build.yml --event workflow_dispatch --limit 5 --json databaseId,headSha \
-      -q "map(select(.headSha == \"$SHA\"))[0].databaseId // empty")
+    RUN=$(gh run list -R "$REPO" --workflow build.yml --event workflow_dispatch --limit 10 --json databaseId,headSha \
+      -q "map(select(.headSha == \"$SHA\" and ((.databaseId|tostring) as \$id | (\",$BEFORE,\" | contains(\",\" + \$id + \",\")) | not)))[0].databaseId // empty")
     [ -n "$RUN" ] && break
   done
   [ -n "$RUN" ] || { echo "couldn't find the Windows build run" >&2; exit 1; }

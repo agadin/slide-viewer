@@ -136,7 +136,12 @@ mod tests {
     fn annotation_paths() {
         assert_eq!(primary_annotation_path("/a/VMS104.ndpi"), "/a/VMS104.ndpi.ndpa");
         let f = fallback_annotation_path(Path::new("/data/annotations"), "/ro/VMS104.ndpi");
-        assert!(f.starts_with("/data/annotations/") && f.ends_with("/VMS104.ndpi.ndpa"), "{f}");
+        // <fallback dir>/<hash of the slide's folder>/<slide>.ndpa, checked by components so the test holds
+        // with Windows' "\" separators as well as "/"
+        let p = Path::new(&f);
+        assert_eq!(p.file_name().and_then(|n| n.to_str()), Some("VMS104.ndpi.ndpa"), "{f}");
+        assert_eq!(p.parent().and_then(|d| d.parent()), Some(Path::new("/data/annotations")), "{f}");
+        assert_eq!(p.parent().and_then(|d| d.file_name()).map(|n| n.len()), Some(16), "hash folder: {f}");
         assert_eq!(f, fallback_annotation_path(Path::new("/data/annotations"), "/ro/VMS104.ndpi"));
         assert_ne!(f, fallback_annotation_path(Path::new("/data/annotations"), "/other/VMS104.ndpi"));
     }
