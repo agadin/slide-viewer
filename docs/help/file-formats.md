@@ -25,15 +25,17 @@ Every file is shown the same way: zoom and pan, pins and rulers, adjustments. An
 | Zeiss | `.czi` | Brightfield and fluorescence (channels are coloured with the settings saved in the file). Z-stacks show every plane: see [Focal planes](viewing.md#focal-planes). Several scenes in one file are shown together. |
 | Olympus | `.vsi` | cellSens and VS-series scanners, brightfield and fluorescence. Open the `.vsi` file; its data folder `_name_` (holding `stack…` folders) must sit next to it. Fluorescence channels are combined in the colour of their emission wavelength (DAPI blue, FITC green, Cy5 red, …), with the brightness range the scanner software saved. Z-stacks show every focal plane with its distance in µm. The low-magnification overview scan and the slide label are used where the file has them. |
 | Zeiss AxioVision | `.zvi` | The older Zeiss format. Fluorescence channels are combined in the colours saved in the file, with brightness stretched so faint signals show. Z-stacks show every plane, and mosaics are assembled from their tiles. The first time a large mosaic opens it is prepared and kept in the app's cache. |
+| Nikon NIS-Elements | `.nd2` | Microscope camera images: colour (for example H&E), brightfield, phase contrast, DIC and fluorescence, from NIS-Elements 3 and later and from older versions (JPEG 2000 files). Fluorescence channels are combined in the colour of their emission wavelength, with brightness stretched so faint signals show; brightfield, phase-contrast and DIC channels are shown in grey. Z-stacks show every focal plane with its distance in µm. For a time series or a multipoint experiment, only the first time point and the first stage position are shown. Large stitched images are prepared once and kept in the app's cache. |
 | Ordinary pictures | `.jpg`, `.jpeg`, `.png`, `.bmp`, `.webp`, flat `.tif` | Photos, screenshots and stitched images. Very large flat TIFFs are prepared once and kept in the app's cache, so the next time they open at once. Usually [uncalibrated](measuring.md#uncalibrated-slides). |
 
-Slides are read with [OpenSlide](https://openslide.org) and, for Zeiss `.czi` files, [libCZI](https://github.com/ZEISS/libczi). Both are built into the app. Olympus `.vsi`, Zeiss `.zvi`, VENTANA DP 200 `.bif` and fluorescence Leica `.scn` slides are read by the app itself. The label, macro and thumbnail pictures a scanner saves are used where the file has them.
+Slides are read with [OpenSlide](https://openslide.org) and, for Zeiss `.czi` files, [libCZI](https://github.com/ZEISS/libczi). Both are built into the app. Olympus `.vsi`, Zeiss `.zvi`, Nikon `.nd2`, VENTANA DP 200 `.bif` and fluorescence Leica `.scn` slides are read by the app itself. The label, macro and thumbnail pictures a scanner saves are used where the file has them.
 
 ### Not supported
 
 - **Leica `.scn` slides with scan areas at different magnifications** (for example a 5× and a 40× area on one slide): OpenSlide can't combine them, and Slide Viewer doesn't yet. The app says so rather than showing one area and hiding the rest.
 - **Zeiss `.zvi` files with zlib-compressed planes** (rare; written by some AxioVision setups): no real file of this kind is publicly available to build and check a reader against (none in OpenSlide's test data or on the OME image server), so the app says they aren't supported. Convert them to OME-TIFF with QuPath or bfconvert.
-- **Confocal and microscope-camera formats: Leica `.lif`, Olympus `.oir`, Nikon `.nd2`**: these hold research stacks (many channels, time series), not scanned teaching slides, so they aren't read. Export a whole-slide TIFF or OME-TIFF instead.
+- **Confocal and microscope-camera formats: Leica `.lif`, Olympus `.oir`**: these hold research stacks (many channels, time series), not scanned teaching slides, so they aren't read. Export a whole-slide TIFF or OME-TIFF instead.
+- **Nikon `.nd2` time series and multipoint experiments**: only the first time point and the first stage position are shown. Files with lossy-compressed frames (rare) don't open.
 - **Other formats** (for example Bio-Formats-only ones): convert them to OME-TIFF with QuPath or bfconvert and open that.
 
 
@@ -64,5 +66,5 @@ See [Where annotations are saved](annotating.md#where-annotations-are-saved) for
 ## Other files the app makes
 
 - **Thumbnails** for the slide browser are kept in the app's cache folder, never next to your slides. Deleting them is safe; they're made again.
-- **Prepared pyramids** of very large plain TIFF and picture files and Zeiss `.zvi` mosaics are kept in the app's cache folder too (the six most recent), so they reopen instantly.
+- **Prepared pyramids** of very large plain TIFF and picture files, Zeiss `.zvi` mosaics and large Nikon `.nd2` images are kept in the app's cache folder too (the six most recent), so they reopen instantly.
 - **Snapshots** are PNG pictures, saved where you choose.
