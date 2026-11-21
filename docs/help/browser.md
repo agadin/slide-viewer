@@ -21,13 +21,14 @@ The app remembers the folder, and the slide you were looking at, and opens them 
 
 Slide Viewer lists every file it can open:
 
-- whole-slide images: `.ndpi`, `.svs`, `.tif`/`.tiff`, `.scn`, `.mrxs`, `.vms`, `.vmu`, `.bif`, `.svslide`, DICOM (`.dcm`) and `.czi`
+- whole-slide images: `.ndpi`, `.svs`, `.tif`/`.tiff`, `.scn`, `.mrxs`, `.vms`, `.vmu`, `.bif`, `.svslide`, DICOM (`.dcm`), `.czi` and Olympus `.vsi`
 - ordinary images: `.jpg`, `.jpeg`, `.png`, `.bmp` and `.webp`
 
 Some files and folders are left out on purpose:
 
 - hidden files and folders (names starting with a dot), and system folders such as the Recycle Bin and `__MACOSX`
 - the data folder that sits next to a MIRAX `.mrxs` slide (the slide itself is listed)
+- the `_name_` data folder that sits next to an Olympus `.vsi` slide (the slide itself is listed)
 - the JPEG pieces next to a Hamamatsu `.vms` slide (the `.vms` is listed)
 - a DICOM slide is a folder of many `.dcm` files: it's listed once
 - empty files

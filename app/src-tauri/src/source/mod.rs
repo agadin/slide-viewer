@@ -10,6 +10,7 @@ pub mod ndpi;
 pub mod openslide;
 pub mod plain;
 pub mod pyramid;
+pub mod vsi;
 
 use std::collections::HashMap;
 use std::io::Cursor;
@@ -293,12 +294,15 @@ pub const OPENSLIDE_EXTS: &[&str] = &[".ndpi", ".svs", ".tif", ".tiff", ".scn", 
 /// Plain raster images (flat TIFFs are tried with OpenSlide first, then here).
 pub const PLAIN_EXTS: &[&str] = &[".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"];
 pub const CZI_EXTS: &[&str] = &[".czi"];
+/// Olympus cellSens / VS-series (pixels in the `_<name>_` folder next to the file).
+pub const VSI_EXTS: &[&str] = &[".vsi"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Backend {
     OpenSlide,
     Plain,
     Czi,
+    Vsi,
 }
 
 fn lower_name(path: &str) -> String {
@@ -313,6 +317,9 @@ pub fn backends_for(path: &str) -> Vec<Backend> {
     if has(CZI_EXTS) {
         v.push(Backend::Czi);
     }
+    if has(VSI_EXTS) {
+        v.push(Backend::Vsi);
+    }
     if has(OPENSLIDE_EXTS) {
         v.push(Backend::OpenSlide);
     }
@@ -324,7 +331,7 @@ pub fn backends_for(path: &str) -> Vec<Backend> {
 
 /// Every extension the app opens (for the folder scan and file dialogs), lower-case with the dot.
 pub fn supported_extensions() -> Vec<String> {
-    let mut v: Vec<String> = OPENSLIDE_EXTS.iter().chain(PLAIN_EXTS).chain(CZI_EXTS).map(|s| s.to_string()).collect();
+    let mut v: Vec<String> = OPENSLIDE_EXTS.iter().chain(PLAIN_EXTS).chain(CZI_EXTS).chain(VSI_EXTS).map(|s| s.to_string()).collect();
     v.sort();
     v.dedup();
     v
@@ -346,6 +353,7 @@ pub fn open_source(path: &str) -> Result<Arc<dyn SlideSource>, String> {
             Backend::OpenSlide => openslide::OpenSlideSource::open(path).map(|s| Arc::new(s) as Arc<dyn SlideSource>),
             Backend::Plain => plain::PlainSource::open(path).map(|s| Arc::new(s) as Arc<dyn SlideSource>),
             Backend::Czi => czi::CziSource::open(path).map(|s| Arc::new(s) as Arc<dyn SlideSource>),
+            Backend::Vsi => vsi::VsiSource::open(path).map(|s| Arc::new(s) as Arc<dyn SlideSource>),
         };
         match r {
             // every backend gets the shared tile LRU (cache.rs)
@@ -493,7 +501,8 @@ mod tests {
         assert_eq!(backends_for("x.png"), vec![Backend::Plain]);
         assert_eq!(backends_for("x.czi"), vec![Backend::Czi]);
         assert!(backends_for("x.ndpa").is_empty());
-        assert!(backends_for("x.vsi").is_empty());
+        assert_eq!(backends_for("/a/OS-2.VSI"), vec![Backend::Vsi]);
+        assert!(supported_extensions().contains(&".vsi".to_string()));
         assert!(supported_extensions().contains(&".svs".to_string()));
     }
 

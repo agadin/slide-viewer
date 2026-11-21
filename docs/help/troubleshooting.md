@@ -20,7 +20,7 @@ The first visit to a folder makes a thumbnail for every slide, which takes a mom
 ## Opening slides
 
 **"Could not open slide"**
-The file is damaged, it's in a format the app can't read (such as Olympus `.vsi`), or the drive it's on was disconnected. Copy the slide to your own disk and try again. For a `.mrxs` slide, its data folder must sit next to it.
+The file is damaged, it's in a format the app can't read or the drive it's on was disconnected. Copy the slide to your own disk and try again. For a `.mrxs` or `.vsi` slide, its data folder must sit next to it.
 
 **The slide is blurry and doesn't sharpen.**
 Tiles load as you move; on a slow drive they take a moment. If it never sharpens, the slide may only have been scanned at low resolution: look at the magnification shown by the zoom buttons.

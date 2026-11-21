@@ -28,7 +28,7 @@ export interface SlideInfo {
   /** Deep-Zoom tile size (256) and level of full resolution (ceil(log2(max(w, h)))) */
   tileSize: number;
   maxLevel: number;
-  /** backend: "openslide" | "plain" | "czi" */
+  /** backend: "openslide" | "plain" | "czi" | "vsi" */
   format: string;
   vendor: string | null;
   width: number;

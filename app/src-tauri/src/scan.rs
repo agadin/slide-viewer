@@ -6,7 +6,7 @@
 //! Scan rules (docs/help/browser.md explains them to users):
 //! - every extension `source::is_supported` accepts (the formats registry) is listed;
 //! - hidden folders/files (".x", and Windows hidden/system), OS/system folders, app bundles and
-//!   MIRAX `.mrxs` data folders are skipped; symlinked folders are followed once (loops are cut by
+//!   MIRAX `.mrxs` and Olympus `.vsi` (`_X_`) data folders are skipped; symlinked folders are followed once (loops are cut by
 //!   remembering canonical paths);
 //! - a DICOM WSI folder (many `.dcm` files) is listed once, and the JPEG tiles that sit next to a
 //!   Hamamatsu `.vms`/`.vmu` are not listed as separate images;
@@ -294,6 +294,13 @@ impl Walker<'_> {
             .filter(|(_, e)| *e == ".mrxs")
             .map(|(f, _)| f.0[..f.0.len() - 5].to_lowercase())
             .collect();
+        // Olympus: "X.vsi" keeps its pixels in the folder "_X_"
+        let vsi_dirs: HashSet<String> = files
+            .iter()
+            .zip(&exts)
+            .filter(|(_, e)| *e == ".vsi")
+            .map(|(f, _)| format!("_{}_", &f.0[..f.0.len() - 4]).to_lowercase())
+            .collect();
         let has_vms = exts.iter().any(|e| e == ".vms" || e == ".vmu");
         let mut dicom_listed = false;
 
@@ -329,7 +336,7 @@ impl Walker<'_> {
         self.tick(false);
 
         for (name, path) in dirs {
-            if mrxs_dirs.contains(&name.to_lowercase()) {
+            if mrxs_dirs.contains(&name.to_lowercase()) || vsi_dirs.contains(&name.to_lowercase()) {
                 continue;
             }
             let r = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
@@ -538,6 +545,10 @@ mod tests {
         touch(&root.join("mirax/S1/Data0000.dat"), b"x");
         touch(&root.join("mirax/S1/Slidedat.ini"), b"x");
         touch(&root.join("mirax/S1/preview.jpg"), b"x");
+        // Olympus VSI: the _X_ data folder (with its .ets stacks) is skipped, the .vsi listed
+        touch(&root.join("olympus/OS-2.vsi"), b"x");
+        touch(&root.join("olympus/_OS-2_/stack1/frame_t.ets"), b"x");
+        touch(&root.join("olympus/_OS-2_/stack10001/frame_t.ets"), b"x");
         // DICOM series: one entry
         touch(&root.join("dicom/1.dcm"), b"x");
         touch(&root.join("dicom/2.dcm"), b"x");
@@ -563,7 +574,7 @@ mod tests {
         let names: Vec<String> = r.entries.iter().map(|e| format!("{}|{}", e.dir, e.name)).collect();
         assert_eq!(
             names,
-            vec!["|VMS104.ndpi", "dicom|1.dcm", "mirax|S1.mrxs", "vms|s.vms", "Week 2|a.TIF", "Week 2/sub|c.png", "Week 10|b.svs"],
+            vec!["|VMS104.ndpi", "dicom|1.dcm", "mirax|S1.mrxs", "olympus|OS-2.vsi", "vms|s.vms", "Week 2|a.TIF", "Week 2/sub|c.png", "Week 10|b.svs"],
         );
         assert!(seen.get() >= 1, "progress was reported");
         let v = &r.entries[0];
@@ -572,10 +583,10 @@ mod tests {
         assert!(v.modified_ms > 0);
         assert_eq!(v.annotation_count, Some(2));
         assert!(v.annotation_path.as_deref().unwrap().ends_with("VMS104.ndpi.ndpa"));
-        assert_eq!(r.entries[4].ext, ".tif");
-        assert_eq!(r.entries[4].annotation_path, None);
-        assert_eq!(r.entries[6].annotation_path.as_deref(), Some(fallback.as_str()));
-        assert_eq!(r.entries[6].annotation_count, Some(1));
+        assert_eq!(r.entries[5].ext, ".tif");
+        assert_eq!(r.entries[5].annotation_path, None);
+        assert_eq!(r.entries[7].annotation_path.as_deref(), Some(fallback.as_str()));
+        assert_eq!(r.entries[7].annotation_count, Some(1));
         assert!(r.errors.is_empty(), "{:?}", r.errors);
         assert!(scan_folder(&root.join("VMS104.ndpi").to_string_lossy(), &fb, &|_| {}).is_err());
         assert!(scan_folder("/nonexistent/sv", &fb, &|_| {}).is_err());
