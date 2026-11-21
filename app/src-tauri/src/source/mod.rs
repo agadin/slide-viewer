@@ -84,18 +84,19 @@ pub fn make_time_points(seconds: &[Option<f64>]) -> Vec<TimePoint> {
         .collect()
 }
 
-/// "0 s", "12.5 s", "2 min 5 s", "1 h 02 min"
+/// "0 s", "12.5 s", "2 min 5 s", "1 h 02 min". Rounds first, then splits, so 899.9 s is "15 min 0 s".
 pub fn time_label(secs: f64) -> String {
     let s = secs.max(0.0);
-    if s < 60.0 {
-        format!("{} s", trim_num(if s < 10.0 { (s * 100.0).round() / 100.0 } else { (s * 10.0).round() / 10.0 }))
-    } else if s < 3600.0 {
-        let m = (s / 60.0).floor();
-        format!("{} min {} s", m, (s - m * 60.0).round() as i64)
-    } else {
-        let h = (s / 3600.0).floor();
-        format!("{} h {:02} min", h, ((s - h * 3600.0) / 60.0).round() as i64)
+    let short = if s < 10.0 { (s * 100.0).round() / 100.0 } else { (s * 10.0).round() / 10.0 };
+    if short < 60.0 {
+        return format!("{} s", trim_num(short));
     }
+    let whole = s.round() as i64;
+    if whole < 3600 {
+        return format!("{} min {} s", whole / 60, whole % 60);
+    }
+    let minutes = (s / 60.0).round() as i64;
+    format!("{} h {:02} min", minutes / 60, minutes % 60)
 }
 
 /// What a backend knows about its image.
@@ -605,6 +606,10 @@ mod tests {
         let labels: Vec<_> = t.iter().map(|p| p.label.as_str()).collect();
         assert_eq!(labels, ["0 s", "2.5 s", "1 min 15 s", "T 4", "1 h 02 min"]);
         assert_eq!(t[3].index, 3);
+        assert_eq!(time_label(899.9), "15 min 0 s");
+        assert_eq!(time_label(59.97), "1 min 0 s");
+        assert_eq!(time_label(3599.6), "1 h 00 min");
+        assert_eq!(time_label(7199.0), "2 h 00 min");
     }
 
     #[test]

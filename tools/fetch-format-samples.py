@@ -146,7 +146,8 @@ ND2_FILES = [
     ("zenodo-12734440/HE_002.nd2", "d5d9b0b742cf8802ec26f32d405074020341c2384ae43807347fc707d3d542db", 17850368),  # George Campbell: H&E, RGB camera
     ("zenodo-17186598/Experiment_0001.nd2", "cdba1aa1625a9a93cd0ee00628400ef049a7034f90cd6a33161e502846e099aa", 49790976),  # Bob Golstein (as the readme spells it): DIC z-stack, 17 planes, padded rows
     ("jonas/header_test1.nd2", "ab054970ac2872e2616f6cde753512e66fa7057501eb881405ec5727c44a7f31", 30666752),  # Jonas Dorn: GFP + DIC, 3 planes x 7 times, XML metadata
-    ("aryeh/b16_14_12.nd2", "0ec63250700580fa2777d342aa85c0175259e127580ecc760c39e2fd78f0634b", 24671709),  # Aryeh Weiss: legacy JPEG 2000 ND2, phase contrast
+    ("aryeh/b16_14_12.nd2", "0ec63250700580fa2777d342aa85c0175259e127580ecc760c39e2fd78f0634b", 24671709),  # Aryeh Weiss: legacy JPEG 2000 ND2, phase contrast, 50 time points
+    ("zenodo-15046688/N1_file_bugged_reconstructed-version.nd2", "794f8716988e77c41dc3f16a490c7af77e942c263e3531986e459a99985d7768", 84156416),  # Louis Romette: 2D-SIM neurons, 5 named stage positions
 ]
 for rel, sha, size in ND2_FILES:
     dest = os.path.join(OUT, "ND2", os.path.basename(rel))
