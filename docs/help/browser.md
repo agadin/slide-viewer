@@ -21,7 +21,7 @@ The app remembers the folder, and the slide you were looking at, and opens them 
 
 Slide Viewer lists every file it can open:
 
-- whole-slide images: `.ndpi`, `.svs`, `.tif`/`.tiff`, `.scn`, `.mrxs`, `.vms`, `.vmu`, `.bif`, `.svslide`, Argos `.avs`, DICOM (`.dcm`), `.czi`, Zeiss `.zvi`, Olympus `.vsi`, Olympus FluoView `.oir` and Leica `.lif`
+- whole-slide images: `.ndpi`, `.svs`, `.tif`/`.tiff`, `.scn`, `.mrxs`, `.vms`, `.vmu`, `.bif`, `.svslide`, Argos `.avs`, DICOM (`.dcm`), `.czi`, Zeiss `.zvi`, Olympus `.vsi`, Olympus FluoView `.oir`, Leica `.lif` and Nikon `.nd2`
 - ordinary images: `.jpg`, `.jpeg`, `.png`, `.bmp` and `.webp`
 
 Some files and folders are left out on purpose:

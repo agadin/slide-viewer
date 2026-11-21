@@ -9,6 +9,7 @@ pub mod scn;
 pub mod cache;
 pub mod czi;
 pub mod lif;
+pub mod nd2;
 pub mod ndpi;
 pub mod oir;
 pub mod openslide;
@@ -310,6 +311,8 @@ pub const ZVI_EXTS: &[&str] = &[".zvi"];
 pub const LIF_EXTS: &[&str] = &[".lif"];
 /// Olympus FluoView confocal (FV3000/FV4000); a series continues in `name_00001`, … next to it.
 pub const OIR_EXTS: &[&str] = &[".oir"];
+/// Nikon NIS-Elements (modern chunked and legacy JPEG 2000).
+pub const ND2_EXTS: &[&str] = &[".nd2"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Backend {
@@ -322,6 +325,7 @@ pub enum Backend {
     Zvi,
     Lif,
     Oir,
+    Nd2,
 }
 
 fn lower_name(path: &str) -> String {
@@ -348,6 +352,9 @@ pub fn backends_for(path: &str) -> Vec<Backend> {
     if has(OIR_EXTS) {
         v.push(Backend::Oir);
     }
+    if has(ND2_EXTS) {
+        v.push(Backend::Nd2);
+    }
     if has(OPENSLIDE_EXTS) {
         v.push(Backend::OpenSlide);
     }
@@ -365,7 +372,7 @@ pub fn backends_for(path: &str) -> Vec<Backend> {
 
 /// Every extension the app opens (for the folder scan and file dialogs), lower-case with the dot.
 pub fn supported_extensions() -> Vec<String> {
-    let mut v: Vec<String> = OPENSLIDE_EXTS.iter().chain(PLAIN_EXTS).chain(CZI_EXTS).chain(VSI_EXTS).chain(ZVI_EXTS).chain(LIF_EXTS).chain(OIR_EXTS).map(|s| s.to_string()).collect();
+    let mut v: Vec<String> = OPENSLIDE_EXTS.iter().chain(PLAIN_EXTS).chain(CZI_EXTS).chain(VSI_EXTS).chain(ZVI_EXTS).chain(LIF_EXTS).chain(OIR_EXTS).chain(ND2_EXTS).map(|s| s.to_string()).collect();
     v.sort();
     v.dedup();
     v
@@ -393,6 +400,7 @@ pub fn open_source(path: &str) -> Result<Arc<dyn SlideSource>, String> {
             Backend::Zvi => zvi::ZviSource::open(path).map(|s| Arc::new(s) as Arc<dyn SlideSource>),
             Backend::Lif => lif::LifSource::open(path).map(|s| Arc::new(s) as Arc<dyn SlideSource>),
             Backend::Oir => oir::OirSource::open(path).map(|s| Arc::new(s) as Arc<dyn SlideSource>),
+            Backend::Nd2 => nd2::Nd2Source::open(path).map(|s| Arc::new(s) as Arc<dyn SlideSource>),
         };
         match r {
             // every backend gets the shared tile LRU (cache.rs)
@@ -551,6 +559,8 @@ mod tests {
         assert!(supported_extensions().contains(&".lif".to_string()));
         assert_eq!(backends_for("/a/Venus Stack.OIR"), vec![Backend::Oir]);
         assert!(supported_extensions().contains(&".oir".to_string()));
+        assert_eq!(backends_for("/a/X.ND2"), vec![Backend::Nd2]);
+        assert!(supported_extensions().contains(&".nd2".to_string()));
         assert!(backends_for("x.ndpa").is_empty());
         assert_eq!(backends_for("/a/OS-2.VSI"), vec![Backend::Vsi]);
         assert!(supported_extensions().contains(&".vsi".to_string()));

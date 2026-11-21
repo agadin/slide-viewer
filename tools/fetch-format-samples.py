@@ -136,4 +136,30 @@ for rel, sha, size in OIR_FILES:
     if h.hexdigest() != sha:
         print(f"CHECKSUM MISMATCH Olympus-OIR/{rel}", flush=True); os.remove(dest); continue
     print(f"ok Olympus-OIR/{rel}", flush=True)
+
+# Nikon .nd2 from the OME sample image server (no published checksums: these pin the files the
+# reader was tested with). Every folder used here has a COPYING file: CC BY 4.0, by the people named.
+ND2 = "https://downloads.openmicroscopy.org/images/ND2/"
+ND2_FILES = [
+    # (path on the server, sha256, size)
+    ("maxime/BF007.nd2", "e3f449796ac2ce82d5734a607d8899a3ec5a9a575161a3eded2e22eedc1dce92", 270336),  # Maxime Woringer: brightfield cell, 16-bit, LV metadata
+    ("zenodo-12734440/HE_002.nd2", "d5d9b0b742cf8802ec26f32d405074020341c2384ae43807347fc707d3d542db", 17850368),  # George Campbell: H&E, RGB camera
+    ("zenodo-17186598/Experiment_0001.nd2", "cdba1aa1625a9a93cd0ee00628400ef049a7034f90cd6a33161e502846e099aa", 49790976),  # Bob Golstein (as the readme spells it): DIC z-stack, 17 planes, padded rows
+    ("jonas/header_test1.nd2", "ab054970ac2872e2616f6cde753512e66fa7057501eb881405ec5727c44a7f31", 30666752),  # Jonas Dorn: GFP + DIC, 3 planes x 7 times, XML metadata
+    ("aryeh/b16_14_12.nd2", "0ec63250700580fa2777d342aa85c0175259e127580ecc760c39e2fd78f0634b", 24671709),  # Aryeh Weiss: legacy JPEG 2000 ND2, phase contrast
+]
+for rel, sha, size in ND2_FILES:
+    dest = os.path.join(OUT, "ND2", os.path.basename(rel))
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    if not (os.path.exists(dest) and os.path.getsize(dest) == size):
+        print(f"downloading ND2/{rel} ({size/1e6:.0f} MB)", flush=True)
+        urllib.request.urlretrieve(ND2 + urllib.parse.quote(rel), dest + ".part")
+        os.replace(dest + ".part", dest)
+    h = hashlib.sha256()
+    with open(dest, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    if h.hexdigest() != sha:
+        print(f"CHECKSUM MISMATCH ND2/{rel}", flush=True); os.remove(dest); continue
+    print(f"ok ND2/{rel}", flush=True)
 print("DONE", flush=True)
