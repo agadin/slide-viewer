@@ -1,0 +1,41 @@
+"""Download one small OpenSlide test file per format the app claims, verifying the sha256 the index lists."""
+import hashlib, json, os, sys, urllib.request, zipfile
+BASE = "https://openslide.cs.cmu.edu/download/openslide-testdata/"
+OUT = sys.argv[1]
+WANT = [
+    "Aperio/CMU-1-Small-Region.svs",       # .svs (JPEG)
+    "Aperio/JP2K-33003-1.svs",             # .svs (JPEG 2000)
+    "Generic-TIFF/CMU-1.tiff",             # tiled TIFF
+    "Huron/Huron-1.tif",                   # .tif
+    "Leica/Leica-Fluorescence-1.scn",      # .scn
+    "Mirax/CMU-1-Saved-1_16.zip",          # .mrxs (zip: .mrxs + data folder)
+    "Philips-TIFF/Philips-4.tiff",         # Philips .tiff
+    "Ventana/Ventana-1.bif",               # .bif
+    "DICOM/JP2K-33003-1.zip",              # .dcm (zip of DICOM files)
+    "Hamamatsu-vms/CMU-1.zip",             # .vms (zip)
+    "Zeiss/Zeiss-5-SlidePreview-JXR.czi",  # .czi
+    "Zeiss/Zeiss-5-Flat.czi",              # .czi mosaic
+    "Olympus/OS-2.zip",                    # .vsi: NOT supported (phase 2), checks it fails gracefully
+]
+idx = json.load(urllib.request.urlopen(BASE + "index.json"))
+os.makedirs(OUT, exist_ok=True)
+for key in WANT:
+    meta = idx[key]
+    dest = os.path.join(OUT, key.replace("/", "__"))
+    if not (os.path.exists(dest) and os.path.getsize(dest) == meta["size"]):
+        print(f"downloading {key} ({meta['size']/1e6:.0f} MB)", flush=True)
+        urllib.request.urlretrieve(BASE + key, dest + ".part")
+        os.replace(dest + ".part", dest)
+    h = hashlib.sha256()
+    with open(dest, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    if h.hexdigest() != meta["sha256"]:
+        print(f"CHECKSUM MISMATCH {key}", flush=True); os.remove(dest); continue
+    if dest.endswith(".zip"):
+        d = dest[:-4]
+        if not os.path.isdir(d):
+            zipfile.ZipFile(dest).extractall(d)
+        os.remove(dest)
+    print(f"ok {key}", flush=True)
+print("DONE", flush=True)

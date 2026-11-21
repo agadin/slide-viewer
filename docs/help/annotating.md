@@ -8,9 +8,22 @@ order: 3
 
 Annotations are pins and shapes you place on a slide, each with a title you choose. They're saved automatically in an `.ndpa` file next to the slide, the same file NDP.view2 writes. Use them for exam answers and for your own study notes.
 
+## The right-click menu
+
+**Right-click** anywhere on the slide to place an annotation there:
+
+- **Add pin here ▸** and **Add flag here ▸**: pick a colour and the pin (or flag) drops exactly where you right-clicked. Type its title and press **↵**.
+- **Measure (ruler)**, **Draw freehand outline**, **Draw circle**, **Draw rectangle**: draw one shape, then you're back to panning. **Esc** cancels.
+- **Zoom ▸**: fit the slide, zoom in or out, or jump to a magnification (1.25× … 40×).
+- **Rotate ▸**, **Undo**, **Redo** and **Save view as PNG…**
+
+Right-click a pin or shape for its own menu: **Rename**, **Style ▸** (pin or flag), **Colour ▸** and **Delete**.
+
+Pins and flags are the two pin icons NDP.view2 uses, and both open there unchanged.
+
 ## The tools
 
-Choose a tool from the toolbar at the bottom of the slide, or press its key:
+The keys below pick a tool directly. For buttons, turn on the tool bar in **Preferences ▸ Viewing ▸ tool bar**; it then sits at the bottom of the slide.
 
 | Tool | Key | How to use it |
 | --- | --- | --- |
@@ -21,7 +34,9 @@ Choose a tool from the toolbar at the bottom of the slide, or press its key:
 | **Circle** | C | Drag from the centre outwards. |
 | **Rectangle** | B | Drag from one corner to the opposite corner. |
 
-The scroll wheel zooms with every tool, and dragging with the right mouse button pans. **Esc** cancels a shape you're drawing; press it again to clear the selection, and once more to go back to **Pan**.
+The scroll wheel zooms with every tool. **Esc** cancels a shape you're drawing; press it again to clear the selection, and once more to go back to **Pan**.
+
+No mouse? Press **X** for the keyboard cursor, then **P** places a pin and **Space** sets the points of a ruler or shape. See [Keyboard only](accessibility.md#keyboard-only).
 
 ## Place a pin
 

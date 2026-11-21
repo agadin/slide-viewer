@@ -348,6 +348,7 @@ fn tile_response(reg: &SlideRegistry, uri_path: &str) -> Response<Vec<u8>> {
 /// Menu item ids the frontend receives as the "menu" event payload (CONTRACTS.md).
 const MENU_EVENTS: &[&str] = &[
     "open_folder",
+    "open_file",
     "rescan_folder",
     "export_ndpa",
     "snapshot",
@@ -368,6 +369,7 @@ fn build_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<Men
     let item = |id: &str, label: &str, accel: Option<&str>| MenuItem::with_id(app, id, label, true, accel);
     let prefs = item("preferences", "Preferences…", Some("CmdOrCtrl+,"))?;
     let open = item("open_folder", "Open Folder…", Some("CmdOrCtrl+O"))?;
+    let open_file = item("open_file", "Open Slide…", Some("CmdOrCtrl+Shift+O"))?;
     let rescan = item("rescan_folder", "Rescan Folder", Some("CmdOrCtrl+R"))?;
     let export = item("export_ndpa", "Export Annotations (.ndpa)…", Some("CmdOrCtrl+E"))?;
     let snapshot = item("snapshot", "Save Snapshot (PNG)…", Some("CmdOrCtrl+Shift+S"))?;
@@ -408,13 +410,13 @@ fn build_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<Men
     )?;
 
     #[cfg(target_os = "macos")]
-    let file_menu = Submenu::with_items(app, "File", true, &[&open, &rescan, &sep()?, &export, &snapshot, &sep()?, &close_w])?;
+    let file_menu = Submenu::with_items(app, "File", true, &[&open, &open_file, &rescan, &sep()?, &export, &snapshot, &sep()?, &close_w])?;
     #[cfg(not(target_os = "macos"))]
     let file_menu = Submenu::with_items(
         app,
         "File",
         true,
-        &[&open, &rescan, &sep()?, &export, &snapshot, &sep()?, &prefs, &updates, &sep()?, &close_w, &PredefinedMenuItem::quit(app, None)?],
+        &[&open, &open_file, &rescan, &sep()?, &export, &snapshot, &sep()?, &prefs, &updates, &sep()?, &close_w, &PredefinedMenuItem::quit(app, None)?],
     )?;
 
     // Cut/copy/paste/select-all are required on macOS for text fields.
@@ -448,6 +450,20 @@ fn build_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<Men
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Open the main window at most of the screen (about 90% wide, 88% tall, centred) instead of
+/// the small fixed size in tauri.conf.json, so a slide gets the room on any monitor.
+fn fit_to_screen<R: tauri::Runtime>(w: &tauri::WebviewWindow<R>) {
+    let Ok(Some(m)) = w.current_monitor() else { return };
+    let scale = m.scale_factor();
+    let size = m.size().to_logical::<f64>(scale);
+    let (cw, ch) = (size.width * 0.9, size.height * 0.88);
+    // never smaller than the config's minimum, never bigger than the screen
+    let width = cw.max(1024.0).min(size.width);
+    let height = ch.max(700.0).min(size.height);
+    let _ = w.set_size(tauri::LogicalSize::new(width, height));
+    let _ = w.center();
+}
+
 pub fn run() {
     let registry = Arc::new(SlideRegistry::default());
     let reg_for_protocol = registry.clone();
@@ -467,6 +483,7 @@ pub fn run() {
         .setup(|app| {
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.set_title("Slide Viewer");
+                fit_to_screen(&w);
             }
             app.set_menu(build_menu(app.handle())?)?;
             // ==== formats: backend caches (plain-image disk pyramids, CZI attachments) ====

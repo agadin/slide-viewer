@@ -24,7 +24,7 @@ import {
   toggleDir,
   type Row,
 } from "../lib/browser";
-import { useMenuEvent } from "../lib/menu";
+import { fireMenu, useMenuEvent } from "../lib/menu";
 import { useSettings } from "../lib/settings";
 import { useStore } from "../lib/store";
 import { clearThumbFailures, useThumb } from "../lib/thumbs";
@@ -33,6 +33,10 @@ import { SearchField } from "./controls";
 import { IconPin, IconTri } from "./icons";
 import { Check, PrefGroup, PrefRow, Seg } from "./prefsUi";
 import "./browser.css";
+import { announce, treePositions } from "../lib/announce"; // a11y(semantics)
+
+type TreePos = { level: number; setsize: number; posinset: number };
+const plural = (k: number, one: string) => `${k} ${one}${k === 1 ? "" : "s"}`;
 
 const revealLabel = isMac ? "Show in Finder" : "Show in Explorer";
 
@@ -94,15 +98,17 @@ function Thumb({ entry, size }: { entry: ScanEntry; size: number }) {
   const { url, error } = useThumb(entry, visible);
   return (
     <div ref={ref} className={`br-thumb ${url ? "has" : ""}`} style={{ width: size, height: Math.round(size * 0.62) }} title={error ? `No preview: ${error}` : undefined}>
-      {url ? <img src={url} alt="" draggable={false} /> : <span className="br-ext">{error ? "—" : entry.ext.slice(1).toUpperCase()}</span>}
+      {url ? <img src={url} alt="" draggable={false} /> : <span className="br-ext" aria-hidden="true" data-ext={error ? "—" : entry.ext.slice(1).toUpperCase()} />}
     </div>
   );
 }
 
 const SlideRow = memo(function SlideRow(p: {
   row: Extract<Row, { kind: "slide" }>;
+  pos: TreePos | undefined;
   current: boolean;
   cursor: boolean;
+  tabbable: boolean;
   thumbSize: number;
   loading: boolean;
   failed: boolean;
@@ -111,11 +117,26 @@ const SlideRow = memo(function SlideRow(p: {
 }) {
   const e = p.row.entry;
   const n = e.annotationCount ?? (e.annotationPath ? null : 0);
+  // a11y: the spoken name starts with the row's visible text, in the same order (WCAG 2.5.3 label in name)
+  const meta = `${e.ext.slice(1).toUpperCase()}${e.size ? ` · ${fmtSize(e.size)}` : ""}${p.loading ? " · opening" : ""}${p.failed ? " · can't open" : ""}`;
+  const label = [
+    displayName(e),
+    p.thumbSize > 0 ? meta : "",
+    e.annotationPath && n !== 0 ? (n === null ? "has annotations" : plural(n, "annotation")) : "",
+    p.thumbSize > 0 ? "" : meta,
+  ]
+    .filter(Boolean)
+    .join(", ");
   return (
     <div
       role="treeitem"
-      aria-level={p.row.depth + 1}
+      aria-label={label}
+      aria-level={p.pos?.level ?? p.row.depth + 1}
+      aria-setsize={p.pos?.setsize}
+      aria-posinset={p.pos?.posinset}
       aria-selected={p.current}
+      aria-current={p.current ? "page" : undefined}
+      tabIndex={p.tabbable ? 0 : -1}
       data-key={p.row.key}
       className={`br-row br-slide ${p.current ? "on" : ""} ${p.cursor ? "cur" : ""} ${p.thumbSize ? "" : "compact"}`}
       style={{ paddingLeft: 8 + p.row.depth * 14 }}
@@ -126,6 +147,7 @@ const SlideRow = memo(function SlideRow(p: {
       {p.thumbSize > 0 && <Thumb entry={e} size={p.thumbSize} />}
       <div className="br-text">
         <div className="br-name">{displayName(e)}</div>
+        {/* a11y: a space between the parts, so their text doesn't run together ("KidneyNDPI") */}{" "}
         {p.thumbSize > 0 && (
           <div className="br-meta">
             {e.ext.slice(1).toUpperCase()}
@@ -134,7 +156,7 @@ const SlideRow = memo(function SlideRow(p: {
             {p.failed && <span className="warn"> · can't open</span>}
           </div>
         )}
-      </div>
+      </div>{" "}
       {e.annotationPath && n !== 0 && (
         <span className="br-badge" title={n === null ? "Has an annotation file" : `${n} annotation${n === 1 ? "" : "s"} saved`}>
           <IconPin />
@@ -145,13 +167,24 @@ const SlideRow = memo(function SlideRow(p: {
   );
 });
 
-const DirRow = memo(function DirRow(p: { row: Extract<Row, { kind: "dir" }>; cursor: boolean; onPick: (r: Row) => void; onMenu: (r: Row, e: MouseEvent) => void }) {
+const DirRow = memo(function DirRow(p: {
+  row: Extract<Row, { kind: "dir" }>;
+  pos: TreePos | undefined;
+  cursor: boolean;
+  tabbable: boolean;
+  onPick: (r: Row) => void;
+  onMenu: (r: Row, e: MouseEvent) => void;
+}) {
   const r = p.row;
   return (
     <div
       role="treeitem"
-      aria-level={r.depth + 1}
+      aria-label={`${r.name}, ${plural(r.count, "slide")}, folder${r.annotated ? `, ${r.annotated} annotated` : ""}`}
+      aria-level={p.pos?.level ?? r.depth + 1}
+      aria-setsize={p.pos?.setsize}
+      aria-posinset={p.pos?.posinset}
       aria-expanded={r.open}
+      tabIndex={p.tabbable ? 0 : -1}
       data-key={r.key}
       className={`br-row br-dir ${p.cursor ? "cur" : ""}`}
       style={{ paddingLeft: 6 + r.depth * 14 }}
@@ -165,7 +198,7 @@ const DirRow = memo(function DirRow(p: { row: Extract<Row, { kind: "dir" }>; cur
       <svg className="br-folder-ic" width="14" height="14" viewBox="0 0 16 16" aria-hidden>
         <path d="M1.5 4.5v8h13v-7h-7l-1.5-1.5h-4.5z" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
       </svg>
-      <span className="br-name">{r.name}</span>
+      <span className="br-name">{r.name}</span>{" "}
       <span className="br-count" title={`${r.count} slide${r.count === 1 ? "" : "s"}${r.annotated ? `, ${r.annotated} with annotations` : ""}`}>
         {r.count}
       </span>
@@ -192,8 +225,11 @@ export function Browser() {
   /** show the keyboard cursor ring only while the list is driven from the keyboard */
   const [kbd, setKbd] = useState(false);
   const scrollPending = useRef(false);
+  /** a11y: move DOM focus to the cursor row after the next render (roving tabindex) */
+  const focusPending = useRef(false);
 
   useMenuEvent("open_folder", () => void openFolder());
+  useMenuEvent("open_file", () => void openSingleFile());
   useMenuEvent("rescan_folder", () => {
     clearThumbFailures();
     void rescan();
@@ -230,6 +266,37 @@ export function Browser() {
   const rows = useMemo(() => buildRows(entries, b.collapsedDirs, b.query), [entries, b.collapsedDirs, b.query]);
   const totals = useMemo(() => summarize(entries), [entries]);
   const matches = useMemo(() => (b.query.trim() ? rows.filter((r) => r.kind === "slide").length : entries.length), [rows, b.query, entries.length]);
+  const positions = useMemo(() => treePositions(rows), [rows]);
+  /** the one row in the tab order: the cursor, else the open slide, else the first row */
+  const tabKey = rows.some((r) => r.key === cursor) ? cursor : rows[0]?.key ?? null;
+
+  // a11y: label the search box and announce how many slides match (after typing pauses)
+  useEffect(() => {
+    const el = searchRef.current;
+    if (!el) return;
+    el.setAttribute("aria-label", "Search slides by name or folder");
+    el.setAttribute("aria-controls", "sv-slide-tree");
+  });
+  const firstQuery = useRef(true);
+  useEffect(() => {
+    if (firstQuery.current) {
+      firstQuery.current = false;
+      return;
+    }
+    if (!b.scan) return;
+    const t = setTimeout(() => {
+      const q = b.query.trim();
+      announce(q ? (matches ? `${plural(matches, "slide")} of ${totals.slides} match “${q}”.` : `No slides match “${q}”.`) : `Showing all ${plural(totals.slides, "slide")}.`);
+    }, 600);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [b.query]);
+  // a11y: announce a finished scan
+  const wasScanning = useRef(b.scanning);
+  useEffect(() => {
+    if (wasScanning.current && !b.scanning && b.scan) announce(`Found ${plural(totals.slides, "slide")}${totals.annotated ? `, ${totals.annotated} annotated` : ""}.`);
+    wasScanning.current = b.scanning;
+  }, [b.scanning, b.scan, totals]);
 
   // the cursor follows the open slide
   useEffect(() => {
@@ -246,11 +313,29 @@ export function Browser() {
     scrollPending.current = false;
     el.scrollIntoView?.({ block: "nearest" });
   }, [cursor, rows]);
+  // roving tabindex: when the tree has focus (or was asked to take it), focus follows the cursor
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list || !tabKey) return;
+    const within = list.contains(document.activeElement) && document.activeElement !== list;
+    if (!focusPending.current && !within) return;
+    focusPending.current = false;
+    const el = list.querySelector<HTMLElement>(`[data-key="${CSS.escape(tabKey)}"]`);
+    if (el && document.activeElement !== el) el.focus({ preventScroll: true });
+  }, [tabKey, rows]);
+  const focusTree = () => {
+    focusPending.current = true;
+    const el = tabKey ? listRef.current?.querySelector<HTMLElement>(`[data-key="${CSS.escape(tabKey)}"]`) : null;
+    if (el) {
+      focusPending.current = false;
+      el.focus({ preventScroll: true });
+    } else listRef.current?.focus();
+  };
 
   const pick = useCallback((r: Row) => {
     setCursor(r.key);
     if (r.kind === "dir") toggleDir(r.dir);
-    else openEntry(r.entry);
+    else openEntry(r.entry, { picked: true });
   }, []);
 
   const menu = useCallback(
@@ -265,7 +350,7 @@ export function Browser() {
             x: ev.clientX,
             y: ev.clientY,
             items: [
-              { label: "Open", onSelect: () => openEntry(e) },
+              { label: "Open", onSelect: () => openEntry(e, { picked: true }) },
               "sep",
               { label: revealLabel, onSelect: () => void revealFile(e.path) },
               { label: "Copy Path", onSelect: () => void navigator.clipboard?.writeText(e.path) },
@@ -312,7 +397,10 @@ export function Browser() {
       rows.findIndex((r) => r.key === cursor),
     );
     const r = rows[i];
-    const go = (j: number) => setCursor(rows[Math.max(0, Math.min(rows.length - 1, j))].key);
+    const go = (j: number) => {
+      focusPending.current = true;
+      setCursor(rows[Math.max(0, Math.min(rows.length - 1, j))].key);
+    };
     let used = true;
     switch (e.key) {
       case "ArrowDown":
@@ -341,7 +429,10 @@ export function Browser() {
         if (r.kind === "dir" && r.open && !b.query.trim()) toggleDir(r.dir, false);
         else {
           const parent = r.kind === "dir" ? parentDir(r.dir) : r.entry.dir;
-          if (parent) setCursor(dirKey(parent));
+          if (parent) {
+            focusPending.current = true;
+            setCursor(dirKey(parent));
+          }
         }
         break;
       case "Enter":
@@ -361,16 +452,16 @@ export function Browser() {
     if (e.key === "ArrowDown" && rows.length) {
       e.preventDefault();
       const first = rows.find((r) => r.kind === "slide") ?? rows[0];
+      focusPending.current = true;
       setCursor(first.key);
       setKbd(true);
-      listRef.current?.focus();
     }
   };
   const searchEnter = () => {
     const first = rows.find((r) => r.kind === "slide");
     if (first && first.kind === "slide") {
       setCursor(first.key);
-      openEntry(first.entry);
+      openEntry(first.entry, { picked: true });
     }
   };
 
@@ -380,7 +471,27 @@ export function Browser() {
   return (
     <div className="br">
       <div className="br-head">
-        <button className="br-root" onClick={() => void openFolder()} title={`${b.root}\nClick to choose a different folder`}>
+        <button
+          className="br-root"
+          aria-haspopup="menu"
+          onClick={(e) => {
+            // a small menu: another folder, or just one slide file
+            const r = e.currentTarget.getBoundingClientRect();
+            useStore.getState().setUi({
+              menu: {
+                x: r.left,
+                y: r.bottom + 4,
+                items: [
+                  { label: "Choose Folder…", shortcut: "⌘O", onSelect: () => void openFolder() },
+                  { label: "Open a Single Slide…", shortcut: "⇧⌘O", disabled: !hasTauri, onSelect: () => void openSingleFile() },
+                  "sep",
+                  { label: "Rescan This Folder", shortcut: "⌘R", onSelect: () => fireMenu("rescan_folder") },
+                ],
+              },
+            });
+          }}
+          title={`${b.root}\nClick to choose another folder or open a single slide`}
+        >
           <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden>
             <path d="M1.5 4.5v8h13v-7h-7l-1.5-1.5h-4.5z" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
           </svg>
@@ -409,7 +520,7 @@ export function Browser() {
         value={b.query}
         onChange={(q) => setBrowser({ query: q })}
         onEnter={searchEnter}
-        onEscape={() => listRef.current?.focus()}
+        onEscape={focusTree}
         onKey={searchKey}
         inputRef={searchRef}
         placeholder="Search slides"
@@ -422,32 +533,40 @@ export function Browser() {
         </div>
       )}
       {b.error && (
-        <div className="br-status warn">
+        <div className="br-status warn" role="alert">
           <span>{b.error}</span>
           <button className="btn ghost" onClick={() => void openFolder()}>
-            Choose…
+            Choose Folder…
           </button>
+          {hasTauri && (
+            <button className="btn ghost" onClick={() => void openSingleFile()}>
+              Open a Slide…
+            </button>
+          )}
         </div>
       )}
       <VisibleCtx.Provider value={watch}>
         <div
           ref={listRef}
           className={`br-list ${kbd ? "kbd-nav" : ""}`}
+          id="sv-slide-tree"
           role="tree"
           aria-label="Slides"
-          tabIndex={0}
+          tabIndex={rows.length ? -1 : 0}
           onKeyDown={onListKey}
           onMouseDown={() => kbd && setKbd(false)}
         >
           {rows.map((r) =>
             r.kind === "dir" ? (
-              <DirRow key={r.key} row={r} cursor={cursor === r.key} onPick={pick} onMenu={menu} />
+              <DirRow key={r.key} row={r} pos={positions.get(r.key)} cursor={cursor === r.key} tabbable={tabKey === r.key} onPick={pick} onMenu={menu} />
             ) : (
               <SlideRow
                 key={r.key}
                 row={r}
+                pos={positions.get(r.key)}
                 current={current === r.entry.path}
                 cursor={cursor === r.key}
+                tabbable={tabKey === r.key}
                 thumbSize={thumbSize}
                 loading={current === r.entry.path && slideLoading}
                 failed={current === r.entry.path && !!slideError}
@@ -494,7 +613,10 @@ async function openSingleFile() {
       title: "Open a slide",
       filters: exts.length ? [{ name: "Slides and images", extensions: exts.map((e) => e.replace(/^\./, "")) }] : undefined,
     });
-    if (typeof p === "string") void useStore.getState().openSlide(p);
+    if (typeof p === "string") {
+      void useStore.getState().openSlide(p);
+      if (useSettings.getState().s.browser.hideOnOpenFile) useStore.getState().setUi({ sidebarOpen: false });
+    }
   } catch {
     /* not in the app */
   }
@@ -541,6 +663,18 @@ export function BrowserPrefs() {
       <PrefGroup title="List">
         <PrefRow label="Thumbnails" help="Off shows a compact list of names.">
           <Seg value={cur} options={sizes} onChange={(v) => set("browser", { thumbSize: Number(v) })} />
+        </PrefRow>
+      </PrefGroup>
+      <PrefGroup title="When a slide opens">
+        <PrefRow label="Picked from the list" help="Hide the slide browser so the slide gets the room. Show it again with Slides in the top bar.">
+          <Check checked={s.hideOnPick} onChange={(v) => set("browser", { hideOnPick: v })}>
+            Hide the slide browser
+          </Check>
+        </PrefRow>
+        <PrefRow label="Opened with File ▸ Open…">
+          <Check checked={s.hideOnOpenFile} onChange={(v) => set("browser", { hideOnOpenFile: v })}>
+            Hide the slide browser
+          </Check>
         </PrefRow>
       </PrefGroup>
       <PrefGroup title="At launch">

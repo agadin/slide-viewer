@@ -25,8 +25,8 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import OpenSeadragon from "openseadragon";
-import { useStore } from "../lib/store";
-import { useSettings } from "../lib/settings";
+import { isTilted, useStore } from "../lib/store";
+import { useViewerSettings } from "../lib/a11y"; // a11y(visual): was useSettings((s) => s.s.viewer)
 import { tileUrl } from "../lib/backend";
 import { magFromUmPerPx } from "../lib/coords";
 import { ViewerContext, type ViewerContextValue } from "../lib/viewerContext";
@@ -39,9 +39,38 @@ import { ZoomPresets } from "./viewer/ZoomPresets";
 import { ZSlider } from "./viewer/ZSlider";
 import { Snapshot } from "./viewer/Snapshot";
 import { MAX_ZOOM_PIXEL_RATIO } from "./viewer/viewMath";
-import { setActiveViewer } from "./viewer/viewerHandle";
+import { fitVisible, setActiveViewer } from "./viewer/viewerHandle";
 import { makeCoords } from "./viewer/makeCoords";
 import "./viewer/viewer.css";
+import { basename } from "../lib/backend";
+import { KEY_HINT, slideFacts, spokenZoom } from "../lib/announce";
+
+const DESC_ID = "sv-viewer-desc";
+
+/** a11y(semantics): OSD's focusable canvas element is the keyboard "application"; its drawing canvases are decorative */
+function labelViewerElement(v: OpenSeadragon.Viewer, info: SlideInfo) {
+  const el = (v as unknown as { canvas?: HTMLElement }).canvas;
+  if (!el) return;
+  el.setAttribute("role", "application");
+  el.setAttribute("aria-roledescription", "slide viewer");
+  el.setAttribute("aria-label", `Slide ${basename(info.path)}`);
+  el.setAttribute("aria-describedby", DESC_ID);
+}
+function hideCanvases(root: HTMLElement) {
+  for (const c of Array.from(root.querySelectorAll("canvas:not([aria-hidden])"))) c.setAttribute("aria-hidden", "true");
+}
+
+/** a11y(semantics): the viewer's description (slide, size, calibration, magnification, annotations, keys) */
+function ViewerDescription({ info }: { info: SlideInfo }) {
+  const zoom = useStore((s) => spokenZoom(s.slide.info, s.view.magnification, s.view.umPerScreenPx));
+  const count = useStore((s) => s.annotations.items.length);
+  return (
+    <div id={DESC_ID} className="sr-only">
+      {basename(info.path)}. {slideFacts(info)}. {zoom ? `Current ${zoom}. ` : ""}
+      {count === 1 ? "1 annotation" : `${count} annotations`}, listed in the Annotations tab. {KEY_HINT}
+    </div>
+  );
+}
 
 const tileSourceFor = (info: SlideInfo, z: number) => ({
   width: info.width,
@@ -83,7 +112,7 @@ export function SlideViewer() {
   const rotation = useStore((s) => s.view.rotation);
   const z = useStore((s) => s.view.z);
   const homeNonce = useStore((s) => s.view.homeNonce);
-  const vs = useSettings((s) => s.s.viewer);
+  const vs = useViewerSettings(); // a11y(visual): animate is off while Reduce motion is on
 
   const hostRef = useRef<HTMLDivElement>(null);
   const [viewer, setViewer] = useState<OpenSeadragon.Viewer | null>(null);
@@ -117,16 +146,33 @@ export function SlideViewer() {
       springStiffness: 9,
       blendTime: 0.1,
       maxZoomPixelRatio: MAX_ZOOM_PIXEL_RATIO,
+      // opening / closing the side panels must not rescale the slide: by default OSD multiplies the
+      // zoom by the change in the viewer's diagonal, so the image (and the magnification) jumped
+      preserveImageSizeOnResize: true,
       minZoomImageRatio: 0.5,
       visibilityRatio: 0.2,
       imageLoaderLimit: 12,
       maxImageCacheCount: 256,
       degrees: useStore.getState().view.rotation,
-      gestureSettingsMouse: { clickToZoom: false, dblClickToZoom: s.dblClickZoom, scrollToZoom: true },
+      // Drag-to-pan must track the pointer 1:1. OSD's onCanvasDrag calls
+      // panBy(delta, immediately = flickEnabled && !constrainDuringPan); with flick off (the mouse
+      // default) every move goes through the 0.35 s spring and the image floats/drifts behind the
+      // cursor. Enabling flick makes the pan immediate; an unreachable flickMinSpeed means release
+      // never throws the image either. Zoom and goTo keep their spring animation.
+      gestureSettingsMouse: { clickToZoom: false, dblClickToZoom: s.dblClickZoom, scrollToZoom: true, flickEnabled: true, flickMinSpeed: Infinity },
+      gestureSettingsPen: { flickEnabled: true, flickMinSpeed: Infinity },
       zoomPerScroll: s.zoomPerScroll,
       ...filterViewerOptions,
       tileSources: tileSourceFor(info, zRef.current),
     } as OpenSeadragon.Options);
+
+    // Resize in the same frame the layout changes. OSD 6 learns about size changes from a ResizeObserver,
+    // whose callback runs AFTER OSD's requestAnimationFrame update, so for at least one painted frame
+    // (longer when WebKit delays the callback) the old canvas bitmap was shown stretched to the new
+    // width: opening/closing the Slides or Image panel visibly squashed the slide. Polling the container
+    // size inside OSD's own update (one cheap read per frame) resizes and redraws before the paint.
+    (v as unknown as { _autoResizePolling: boolean })._autoResizePolling = true;
+    (v as unknown as { _resizeObserver?: ResizeObserver })._resizeObserver?.disconnect();
 
     shownZ.current = zRef.current;
     const coords = makeCoords(v, info, host, mkPoint);
@@ -155,51 +201,20 @@ export function SlideViewer() {
       publish();
     };
     for (const ev of ["update-viewport", "animation", "viewport-change", "resize", "open", "rotate"] as const) v.addHandler(ev, frame);
+    // the first view of a slide: fitted to the uncovered area, not under the panels
+    v.addHandler("open", () => fitVisible(v, info));
     v.addHandler("open-failed", (e: { message?: string }) => {
       useStore.getState().setUi({ toast: { text: `Could not show the slide: ${e.message ?? "unknown error"}`, kind: "error" } });
     });
 
-    // integration: right- or middle-button drag pans with every tool (help: viewing/zoom-and-pan)
-    let rdrag: { x: number; y: number; moved: boolean } | null = null;
-    const onRMove = (e: PointerEvent) => {
-      if (!rdrag) return;
-      const dx = e.clientX - rdrag.x;
-      const dy = e.clientY - rdrag.y;
-      if (!rdrag.moved && Math.hypot(dx, dy) < 4) return;
-      rdrag.moved = true;
-      rdrag.x = e.clientX;
-      rdrag.y = e.clientY;
-      v.viewport.panBy(v.viewport.deltaPointsFromPixels(new OpenSeadragon.Point(-dx, -dy), true), true);
-      v.viewport.applyConstraints();
-    };
-    const onRUp = () => {
-      window.removeEventListener("pointermove", onRMove);
-      window.removeEventListener("pointerup", onRUp);
-      // swallow the context menu a right-drag would open on release (Windows)
-      if (rdrag?.moved) setTimeout(() => (rdrag = null), 0);
-      else rdrag = null;
-    };
-    const onRDown = (e: PointerEvent) => {
-      if (e.pointerType !== "mouse" || (e.button !== 2 && e.button !== 1)) return;
-      rdrag = { x: e.clientX, y: e.clientY, moved: false };
-      window.addEventListener("pointermove", onRMove);
-      window.addEventListener("pointerup", onRUp);
-    };
-    const onRContext = (e: MouseEvent) => {
-      if (rdrag?.moved) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
-    };
-    host.addEventListener("pointerdown", onRDown, true);
-    host.addEventListener("contextmenu", onRContext, true);
+    // right-click never pans: it only opens the menu (AnnotationLayer); panning is the left drag
+
+    labelViewerElement(v, info);
+    hideCanvases(host);
 
     setViewer(v);
     setActiveViewer(v, info);
     return () => {
-      host.removeEventListener("pointerdown", onRDown, true);
-      host.removeEventListener("contextmenu", onRContext, true);
-      onRUp();
       cancelAnimationFrame(raf);
       setActiveViewer(null, null);
       setViewer(null);
@@ -259,8 +274,9 @@ export function SlideViewer() {
   }, [viewer, info, z]);
 
   useEffect(() => {
-    if (homeNonce) viewer?.viewport.goHome();
-  }, [viewer, homeNonce]);
+    // Fit: the whole slide inside the part the side panels don't cover
+    if (homeNonce && viewer && info) fitVisible(viewer, info);
+  }, [viewer, homeNonce]); // eslint-disable-line react-hooks/exhaustive-deps -- info changes recreate the viewer
 
   // mouse / zoom preferences apply to the open viewer without reloading the slide
   useEffect(() => {
@@ -275,6 +291,17 @@ export function SlideViewer() {
 
   useFilterPipeline(viewer, info);
 
+  // a11y(semantics): canvases added later (drawer swaps, the annotation overlay) are decorative too
+  const wrapRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap || typeof MutationObserver === "undefined") return;
+    hideCanvases(wrap);
+    const mo = new MutationObserver(() => hideCanvases(wrap));
+    mo.observe(wrap, { childList: true, subtree: true });
+    return () => mo.disconnect();
+  }, []);
+
   const ctx = useMemo<ViewerContextValue>(
     () => ({
       viewer,
@@ -286,12 +313,21 @@ export function SlideViewer() {
     [viewer, info, onFrame],
   );
 
+  const tiltX = useStore((st) => st.view.tiltX);
+  const tiltY = useStore((st) => st.view.tiltY);
+  const tilted = isTilted({ tiltX, tiltY });
+
   return (
     <ViewerContext.Provider value={ctx}>
-      <div className="viewer-wrap">
+      <div
+        ref={wrapRef}
+        className={`viewer-wrap ${tilted ? "tilted" : ""}`}
+        style={tilted ? ({ "--tilt-x": `${tiltX}deg`, "--tilt-y": `${tiltY}deg` } as React.CSSProperties) : undefined}
+        role="region" aria-label={info ? `Slide viewer: ${basename(info.path)}` : "Slide viewer"}>
         <div ref={hostRef} className="viewer-host" />
         {viewer && info && (
           <>
+            <ViewerDescription info={info} />
             <AnnotationLayer />
             <Navigator />
             <ScaleBar />

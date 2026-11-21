@@ -13,24 +13,27 @@ SLIDE="${1:?usage: tools/smoke.sh <slide> [ndpa] [scratch] [shots]}"
 NDPA="${2:-}"
 SCRATCH="${3:-${TMPDIR:-/tmp}/slide-viewer-smoke}"
 SHOTS="${4:-$SCRATCH/shots}"
-PORT=1437
+PORT="${SMOKE_PORT:-1437}"
 
 rm -rf "$SCRATCH/slides"
 mkdir -p "$SCRATCH/slides" "$SHOTS"
 ln -s "$SLIDE" "$SCRATCH/slides/$(basename "$SLIDE")"
 if [ -n "$NDPA" ]; then cp "$NDPA" "$SCRATCH/slides/$(basename "$SLIDE").ndpa"; fi
+# more slides for the browser list (README screenshots): SMOKE_EXTRA="/a/x.ndpi:/b/y.svs"
+IFS=':' read -r -a EXTRA <<< "${SMOKE_EXTRA:-}"
+for x in "${EXTRA[@]}"; do [ -n "$x" ] && ln -s "$x" "$SCRATCH/slides/$(basename "$x")"; done
 DIR="$SCRATCH/slides"
 REPORT="$DIR/smoke-report.json"
 
 CONFIG=$(python3 - "$DIR" "$PORT" <<'PY'
-import json, sys, urllib.parse
+import json, os, sys, urllib.parse
 d, port = sys.argv[1], sys.argv[2]
 print(json.dumps({
   "build": {"devUrl": f"http://localhost:{port}", "beforeDevCommand": f"npx vite --port {port} --strictPort"},
   "app": {"windows": [{
     "title": "Slide Viewer", "label": "main", "width": 1280, "height": 820, "minWidth": 720, "minHeight": 560,
     "titleBarStyle": "Overlay", "hiddenTitle": True, "trafficLightPosition": {"x": 16, "y": 22}, "center": True,
-    "url": "index.html?smoke=" + urllib.parse.quote(d)}]},
+    "url": "index.html?smoke=" + urllib.parse.quote(d) + os.environ.get("SMOKE_QUERY", "")}]},
 }))
 PY
 )

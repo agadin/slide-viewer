@@ -48,3 +48,51 @@ export function panByScreen(fx: number, fy: number) {
   vp.panTo(to);
   vp.applyConstraints();
 }
+
+/**
+ * The part of the viewer not covered by the side panels. The Slides and Image panels float OVER the
+ * slide (App.css), so the viewer itself never changes size when they open or close; fitting, centring
+ * and the overlay cards use this uncovered area instead.
+ */
+export function visibleArea(container: HTMLElement): { left: number; right: number; width: number; height: number } {
+  const host = container.getBoundingClientRect();
+  const covered = (sel: string) => {
+    const el = document.querySelector<HTMLElement>(sel);
+    if (!el || getComputedStyle(el).display === "none") return null;
+    return el.getBoundingClientRect();
+  };
+  const side = covered(".sv-side"), panel = covered(".sv-panel");
+  const left = side ? Math.max(0, Math.min(host.width, side.right - host.left)) : 0;
+  const right = panel ? Math.max(0, Math.min(host.width, host.right - panel.left)) : 0;
+  return { left, right, width: Math.max(40, host.width - left - right), height: host.height };
+}
+
+/** show the whole slide inside the uncovered area (the "Fit" / home view), honouring rotation */
+export function fitVisible(v: OpenSeadragon.Viewer, info: SlideInfo, immediately = true) {
+  const vp = v.viewport;
+  vp.goHome(true); // OSD's home: the slide fitted to the whole container
+  const box = visibleArea(v.container);
+  const W = vp.getContainerSize().x, H = vp.getContainerSize().y;
+  if (!W || !H) return;
+  // the rotated slide's bounding box in image px
+  const r = (vp.getRotation() * Math.PI) / 180;
+  const c = Math.abs(Math.cos(r)), s = Math.abs(Math.sin(r));
+  const bw = info.width * c + info.height * s, bh = info.width * s + info.height * c;
+  const margin = 0.96; // a little breathing room inside the uncovered area
+  const s0 = Math.min(W / bw, H / bh);
+  const s1 = Math.min((box.width * margin) / bw, (box.height * margin) / bh);
+  vp.zoomBy(s1 / s0, vp.getCenter(true), true);
+  // move the slide's centre to the middle of the uncovered area
+  const dx = box.left + box.width / 2 - W / 2;
+  // (a fresh Point from OSD itself: importing OpenSeadragon here would load it in the headless tests)
+  const delta = vp.getCenter(true);
+  delta.x = -dx;
+  delta.y = 0;
+  vp.panBy(vp.deltaPointsFromPixels(delta, true), true);
+  if (!immediately) vp.applyConstraints();
+}
+
+/** the Fit action for code outside the viewer */
+export function fitActive() {
+  if (active) fitVisible(active.viewer, active.info);
+}

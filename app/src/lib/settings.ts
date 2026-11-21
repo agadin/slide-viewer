@@ -7,6 +7,7 @@
 import { create } from "zustand";
 
 // ================================================================ viewer (owner: viewer)
+export type ScaleBarPos = "bottom-left" | "bottom-right" | "top-left" | "top-right";
 export interface ViewerSettings {
   /** zoom factor per scroll-wheel step */
   zoomPerScroll: number;
@@ -14,9 +15,19 @@ export interface ViewerSettings {
   /** smooth zoom / pan animation */
   animate: boolean;
   showNavigator: boolean;
+  /** overview map: longest side in CSS px (drag its corner, or Preferences ▸ Viewing) */
+  navSize: number;
+  /** overview map: top-left corner within the slide area, px; null = the default top-left spot */
+  navPos: { x: number; y: number } | null;
   showScaleBar: boolean;
-  /** zoom preset buttons and the magnification readout */
-  showZoomPresets: boolean;
+  /** the zoom bar (presets + magnification readout, top right). Off by default: zoom lives in the right-click menu */
+  showZoomBar: boolean;
+  /** the floating tool bar at the bottom. Off by default: annotations are placed from the right-click menu */
+  showToolbar: boolean;
+  /** where the scale bar sits over the slide */
+  scaleBarPos: ScaleBarPos;
+  /** open the window in full screen at launch */
+  openFullScreen: boolean;
   /** degrees per step for free rotation (Shift+, / Shift+. and Shift-click on the rotate buttons) */
   rotateStep: number;
   /** PNG snapshot options (remembered between snapshots) */
@@ -27,8 +38,13 @@ const viewerDefaults: ViewerSettings = {
   dblClickZoom: true,
   animate: true,
   showNavigator: true,
+  navSize: 200,
+  navPos: null,
   showScaleBar: true,
-  showZoomPresets: true,
+  showZoomBar: false,
+  showToolbar: false,
+  scaleBarPos: "bottom-left",
+  openFullScreen: false,
   rotateStep: 15,
   snapshot: { scale: 2, annotations: true, scaleBar: true, title: true },
 };
@@ -73,6 +89,10 @@ export interface BrowserSettings {
   lastSlide: string | null;
   /** collapsed folders (ScanEntry.dir values) per scanned root, most recent last */
   collapsed: Record<string, string[]>;
+  /** hide the slide browser after picking a slide from its list */
+  hideOnPick: boolean;
+  /** hide the slide browser after opening a slide with File ▸ Open… */
+  hideOnOpenFile: boolean;
 }
 const browserDefaults: BrowserSettings = {
   lastFolder: null,
@@ -81,14 +101,47 @@ const browserDefaults: BrowserSettings = {
   reopenLastSlide: true,
   lastSlide: null,
   collapsed: {},
+  hideOnPick: false,
+  hideOnOpenFile: false,
 };
 // ================================================================ end browser
+
+// ================================================================ a11y (owner: a11y visual)
+/** "system" follows the OS setting (prefers-reduced-motion / prefers-contrast) */
+export type A11yTri = "system" | "on" | "off";
+export interface A11ySettings {
+  /** UI text size: 1, 1.15, 1.3 or 1.5 (100–150 %) */
+  textScale: number;
+  /** opaque panels, stronger borders, solid annotation labels */
+  highContrast: A11yTri;
+  /** no smooth zoom/pan and no CSS transitions or animations */
+  reduceMotion: A11yTri;
+  /** a contrasting halo on pins and shapes, and the colour name in their labels */
+  colorBlindSafe: boolean;
+  /** pins and annotation labels drawn larger: 1, 1.25, 1.5 or 2 */
+  annotationScale: number;
+  /**
+   * single-character shortcuts (V P R F C B X N M H 0 + − , . [ ] Space…) only work while the slide has the
+   * keyboard focus (WCAG 2.1.4), so speech input and stray key presses elsewhere can't trigger them
+   */
+  singleKeysOnSlide: boolean;
+}
+export const a11yDefaults: A11ySettings = {
+  textScale: 1,
+  highContrast: "system",
+  reduceMotion: "system",
+  colorBlindSafe: false,
+  annotationScale: 1,
+  singleKeysOnSlide: false,
+};
+// ================================================================ end a11y
 
 export interface Settings {
   viewer: ViewerSettings;
   annotations: AnnotationSettings;
   filters: FilterSettings;
   browser: BrowserSettings;
+  a11y: A11ySettings;
   /** collapsed panel sections (by id) */
   collapsed: string[];
 }
@@ -98,6 +151,7 @@ export const defaultSettings: Settings = {
   annotations: annotationDefaults,
   filters: filterDefaults,
   browser: browserDefaults,
+  a11y: a11yDefaults,
   collapsed: [],
 };
 
@@ -112,6 +166,7 @@ export function mergeSettings(raw: unknown): Settings {
     annotations: block(annotationDefaults, s.annotations),
     filters: block(filterDefaults, s.filters),
     browser: block(browserDefaults, s.browser),
+    a11y: block(a11yDefaults, s.a11y),
     collapsed: Array.isArray(s.collapsed) ? (s.collapsed as string[]) : [],
   };
 }

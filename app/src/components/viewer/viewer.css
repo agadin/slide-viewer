@@ -10,19 +10,21 @@
 }
 
 /* ---------- navigator (overview map), top-left ---------- */
+/* MSG's look: the slide thumbnail edge to edge on a light card, rounded, no inner frame */
 .sv-nav {
   position: absolute;
   z-index: 5;
   left: 12px;
   top: 12px;
-  padding: 6px;
-  border-radius: 14px;
+  border-radius: 16px;
+  overflow: hidden;
   line-height: 0;
   user-select: none;
+  background: rgba(240, 236, 240, 0.85);
+  box-shadow: var(--glass-shadow);
 }
 .sv-nav canvas {
   display: block;
-  border-radius: 8px;
   cursor: crosshair;
   touch-action: none;
 }
@@ -35,13 +37,42 @@
   position: absolute;
   z-index: 5;
   left: 12px;
-  /* above the floating tool pill (App.css .vtool), which spans the bottom of the viewer */
-  bottom: calc(var(--ledger-h, 0px) + var(--tool-h, 40px) + 3 * var(--gap, 10px));
+  bottom: 12px;
   padding: 5px 10px 7px;
   border-radius: 10px;
   pointer-events: none;
-  font: 500 11px/1 var(--mono);
+  font: 500 calc(12px * var(--ts, 1))/1 var(--mono);
   color: var(--tx-1);
+}
+/* corner: Preferences ▸ Viewing ▸ Scale bar position (default bottom left) */
+.sv-scalebar.at-bottom-right,
+.sv-scalebar.at-top-right {
+  left: auto;
+  right: 12px;
+}
+.sv-scalebar.at-top-left,
+.sv-scalebar.at-top-right {
+  bottom: auto;
+  top: 12px;
+}
+/* keep clear of the other cards: the tool pill (bottom), the map (top left), the zoom bar (top right) */
+.sv-scalebar.above-tools.at-bottom-left,
+.sv-scalebar.above-tools.at-bottom-right {
+  bottom: calc(var(--ledger-h, 0px) + var(--tool-h, 40px) + 3 * var(--gap, 10px));
+}
+.sv-scalebar.below-map.at-top-left {
+  top: calc(12px + var(--nav-h, 170px) + 10px);
+}
+.sv-scalebar.below-zoom.at-top-right {
+  top: 56px;
+}
+.sv-scalebar.at-bottom-right .bar,
+.sv-scalebar.at-top-right .bar {
+  margin-left: auto;
+}
+.sv-scalebar.at-bottom-right,
+.sv-scalebar.at-top-right {
+  text-align: right;
 }
 .sv-scalebar .bar {
   height: 5px;
@@ -69,7 +100,7 @@
 .sv-zoom .tbtn {
   height: 26px;
   padding: 0 8px;
-  font: 500 12px/1 var(--mono);
+  font: 500 calc(12px * var(--ts, 1))/1 var(--mono);
 }
 .sv-zoom .tbtn.digital {
   color: var(--tx-3);
@@ -77,7 +108,7 @@
 .sv-zoom .readout {
   min-width: 58px;
   padding: 0 8px 0 10px;
-  font: 600 12px/1 var(--mono);
+  font: 600 calc(12px * var(--ts, 1))/1 var(--mono);
   color: var(--accent);
   text-align: right;
   white-space: nowrap;
@@ -96,7 +127,7 @@
   gap: 6px;
   padding: 8px 6px;
   border-radius: 16px;
-  font: 500 11px/1 var(--mono);
+  font: 500 calc(12px * var(--ts, 1))/1 var(--mono);
   color: var(--tx-2);
 }
 .sv-zslider input[type="range"] {
@@ -130,7 +161,7 @@
   padding: 0 9px;
 }
 .sv-toolbar .tool-btn .tkey {
-  font: 500 10px/1 var(--mono);
+  font: 500 calc(12px * var(--ts, 1))/1 var(--mono);
   color: var(--tx-4);
 }
 .sv-toolbar .tool-btn.on .tkey {
@@ -139,7 +170,7 @@
 .sv-toolbar .rot-readout {
   min-width: 42px;
   padding: 0 6px;
-  font: 500 12px/1 var(--mono);
+  font: 500 calc(12px * var(--ts, 1))/1 var(--mono);
 }
 .sv-rot-pop {
   position: absolute;
@@ -152,7 +183,7 @@
   gap: 8px;
   padding: 8px 12px;
   border-radius: 14px;
-  font-size: 12px;
+  font-size: calc(12px * var(--ts, 1));
 }
 .sv-rot-pop input[type="range"] {
   width: 200px;
@@ -182,7 +213,7 @@
 .sv-snapshot .row > .lbl {
   width: 92px;
   color: var(--tx-3);
-  font-size: 12px;
+  font-size: calc(12px * var(--ts, 1));
   flex: none;
 }
 .sv-snapshot input[type="text"] {
@@ -191,5 +222,150 @@
 }
 .sv-snapshot .size {
   color: var(--tx-3);
-  font: 500 11px/1.3 var(--mono);
+  font: 500 calc(12px * var(--ts, 1))/1.3 var(--mono);
+}
+
+/* ---------- a11y(semantics): screen-reader-only text, the top-bar heading, viewer focus ---------- */
+.sr-only {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.sv-h1 {
+  font: inherit;
+  margin: 0;
+  min-width: 0;
+  display: flex;
+  overflow: hidden;
+}
+.viewer-host .openseadragon-canvas:focus {
+  outline: none;
+}
+.viewer-host .openseadragon-canvas:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.sv-h2 {
+  font: inherit;
+  margin: 0;
+  min-width: 0;
+}
+
+/* ---------- overview map: hidden / loading / move grip / resize corner ---------- */
+.sv-nav[hidden] {
+  display: none;
+}
+/* no blank card while the first overview image loads */
+.sv-nav.loading {
+  visibility: hidden;
+}
+/* a slim grip along the top: drag to move the map (shown on hover) */
+.sv-nav-grip {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 16px;
+  cursor: grab;
+  opacity: 0;
+  transition: opacity 0.12s;
+  background: linear-gradient(rgba(10, 24, 42, 0.55), rgba(10, 24, 42, 0));
+}
+.sv-nav-grip::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 5px;
+  width: 28px;
+  height: 4px;
+  margin-left: -14px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.85);
+}
+/* bottom-right corner: drag to resize */
+.sv-nav-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+  opacity: 0;
+  transition: opacity 0.12s;
+  background: linear-gradient(135deg, transparent 50%, rgba(10, 24, 42, 0.6) 50%);
+}
+.sv-nav-resize::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid rgba(255, 255, 255, 0.9);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.9);
+}
+.sv-nav:hover .sv-nav-grip,
+.sv-nav:hover .sv-nav-resize,
+.sv-nav.adjusting .sv-nav-grip,
+.sv-nav.adjusting .sv-nav-resize {
+  opacity: 1;
+}
+.sv-nav.adjusting .sv-nav-grip {
+  cursor: grabbing;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sv-nav-grip,
+  .sv-nav-resize {
+    transition: none;
+  }
+}
+
+/* ---------- perspective tilt (Adjust ▸ Rotate ▸ Perspective): the slide plane tips in 3D ---------- */
+.viewer-wrap.tilted {
+  perspective: 1600px;
+  perspective-origin: 50% 50%;
+}
+.viewer-wrap.tilted > .viewer-host,
+.viewer-wrap.tilted > .ann-canvas {
+  transform: rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg));
+  transform-origin: 50% 50%;
+  /* the same plane for both, so pins stay on their tissue */
+  transform-style: flat;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .viewer-wrap > .viewer-host,
+  .viewer-wrap > .ann-canvas {
+    transition: transform 0.18s ease-out;
+  }
+}
+
+/* ---------- keep the cards beside the floating side panels (App.css "side panels float OVER") ---------- */
+.sv-scalebar {
+  left: calc(var(--side-w, 0px) + 12px);
+}
+.sv-scalebar.at-bottom-right,
+.sv-scalebar.at-top-right {
+  right: calc(var(--panel-w, 0px) + 12px);
+}
+.sv-zoom,
+.sv-zslider {
+  right: calc(var(--panel-w, 0px) + 12px);
+}
+.sv-rot-pop,
+.vtool.sv-toolbar {
+  left: calc(var(--side-w, 0px) + (100% - var(--side-w, 0px) - var(--panel-w, 0px)) / 2);
+}
+.vtool.sv-toolbar {
+  max-width: calc(100% - var(--side-w, 0px) - var(--panel-w, 0px) - 2 * var(--gap, 10px));
+}
+.viewer-empty {
+  left: var(--side-w, 0px);
+  right: var(--panel-w, 0px);
 }

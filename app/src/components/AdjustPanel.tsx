@@ -5,7 +5,7 @@
  * Filter state is per slide (lib/filters/pipeline.ts keeps filters.bySlide). Owner: filters.
  */
 import { useState, type ReactNode } from "react";
-import { useStore } from "../lib/store";
+import { isTilted, useStore } from "../lib/store";
 import { useSettings } from "../lib/settings";
 import { DEFAULT_FILTERS, type FilterParams, type StainMode } from "../lib/types";
 import { REF_VECTORS, STAIN_NAMES, validVectors } from "../lib/filters/math";
@@ -15,6 +15,14 @@ import { autoLevels, detectStain, estimateVectors, normalise } from "../lib/filt
 import { Check, PrefGroup, PrefRow } from "./prefsUi";
 import { clamp } from "../lib/util";
 import "../lib/filters/filters.css";
+import { sliderValueText } from "../lib/announce"; // a11y(semantics)
+import { undoAdjustment, useAdjustmentUndoCount } from "../lib/filters/history";
+import { rotateStep, rotateTo } from "../lib/keys";
+import { signedDeg } from "./viewer/viewMath";
+
+/** short stain names that fit the narrow panel; the full name is in the tooltip / aria-label */
+const SHORT_STAIN: Record<string, string> = { Haematoxylin: "Haem.", Eosin: "Eosin", DAB: "DAB" };
+const shortStain = (n: string | undefined) => (n ? (SHORT_STAIN[n] ?? n.slice(0, 6)) : "");
 
 const set = (p: Partial<FilterParams>) => useStore.getState().setFilterParams(p);
 
@@ -51,6 +59,7 @@ function Slider(p: {
         value={shown}
         disabled={p.disabled}
         aria-label={p.label}
+        aria-valuetext={sliderValueText(p.label, shown, digits, p.unit)}
         onChange={(e) => p.onChange(Number(e.target.value) / k)}
         onDoubleClick={() => p.onChange(p.def)}
         style={{ ["--fill" as string]: `${((p.value - p.min) / (p.max - p.min)) * 100}%` }}
@@ -62,6 +71,7 @@ function Slider(p: {
           min={p.min * k}
           max={p.max * k}
           disabled={p.disabled}
+          aria-label={`${p.label}${p.unit ? ` (${p.unit})` : ""}`}
           value={draft ?? shown.toFixed(digits)}
           onFocus={(e) => e.target.select()}
           onChange={(e) => {
@@ -81,10 +91,13 @@ function Slider(p: {
 }
 
 function Section(p: { title: string; children: ReactNode; aside?: ReactNode }) {
+  const id = `adj-sec-${p.title.toLowerCase().replace(/[^a-z]+/g, "-")}`;
   return (
-    <section className="adj-sec">
+    <section className="adj-sec" aria-labelledby={id}>
       <div className="adj-sec-h">
-        <span>{p.title}</span>
+        <h3 id={id} className="sv-h2" style={{ flex: 1 }}>
+          {p.title}
+        </h3>
         {p.aside}
       </div>
       {p.children}
@@ -94,7 +107,7 @@ function Section(p: { title: string; children: ReactNode; aside?: ReactNode }) {
 
 function VectorEditor({ vectors, names, onChange }: { vectors: number[][]; names: string[]; onChange: (v: number[][]) => void }) {
   return (
-    <table className="adj-vec">
+    <table className="adj-vec" aria-label="Stain vectors">
       <thead>
         <tr>
           <th />
@@ -106,10 +119,13 @@ function VectorEditor({ vectors, names, onChange }: { vectors: number[][]; names
       <tbody>
         {vectors.slice(0, 2).map((row, i) => (
           <tr key={i}>
-            <th title={names[i]}>{names[i]?.slice(0, 5) ?? `S${i + 1}`}</th>
+            <th scope="row" title={names[i]}>
+              {shortStain(names[i]) || `S${i + 1}`}
+            </th>
             {row.map((x, j) => (
               <td key={j}>
                 <input
+                  aria-label={`${names[i] ?? `Stain ${i + 1}`} ${"RGB"[j]} component`}
                   type="number"
                   step={0.01}
                   min={0}
@@ -139,6 +155,11 @@ export function AdjustPanel() {
   const auto = useStore((s) => s.filters.auto);
   const analysis = useStore((s) => s.filters.analysis);
   const [busy, setBusy] = useState<string | null>(null);
+  const undoCount = useAdjustmentUndoCount();
+  const rotation = useStore((s) => s.view.rotation);
+  const tiltX = useStore((s) => s.view.tiltX);
+  const tiltY = useStore((s) => s.view.tiltY);
+  const tilted = isTilted({ tiltX, tiltY });
 
   const run = (name: string, fn: () => Promise<unknown>) => async () => {
     setBusy(name);
@@ -179,36 +200,54 @@ export function AdjustPanel() {
   else readout = <span className="muted">Not analysed yet. Auto buttons look at a small overview of the whole slide.</span>;
 
   return (
-    <div className={`adj ${disabled ? "adj-off" : ""}`}>
+    <div
+      className={`adj ${disabled ? "adj-off" : ""}`}
+      onKeyDown={(e) => {
+        // ⌘Z / Ctrl+Z inside the Adjust tab undoes adjustments (on the slide it still undoes annotations)
+        const t = e.target as HTMLElement;
+        if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "z" && t.tagName !== "INPUT") {
+          if (undoAdjustment()) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }
+      }}
+    >
       <div className="adj-head">
         <label className="check" title="Compare with the original image (\)">
           <input type="checkbox" className="switch" checked={enabled} onChange={(e) => useStore.getState().setFilters({ enabled: e.target.checked })} />
           Adjustments
         </label>
         <span className="sp" />
-        <button className="btn ghost" disabled={isDefault} onClick={() => set({ ...DEFAULT_FILTERS })} title="Reset every adjustment for this slide">
+        <button className="btn ghost" disabled={!undoCount} onClick={() => undoAdjustment()} title="Undo the last adjustment, e.g. Normalise or Estimate vectors (⌘Z while in this tab)">
+          Undo
+        </button>
+        <button className="btn ghost" disabled={isDefault} onClick={() => set({ ...DEFAULT_FILTERS })} title="Reset every adjustment for this slide (Undo brings them back)">
           Reset
         </button>
       </div>
 
       <Section title="Auto">
-        <div className="adj-readout">{readout}</div>
+        <div className="adj-readout" id="adj-readout">
+          {readout}
+        </div>
         <div className="adj-auto">
-          <button disabled={disabled || running} onClick={run("levels", autoLevels)} title="Black / white points and gamma from the tissue (background ignored)">
+          <button disabled={disabled || running} aria-label={busy === "levels" ? "Auto levels, working" : undefined} aria-describedby="adj-readout" onClick={run("levels", autoLevels)} title="Black / white points and gamma from the tissue (background ignored)">
             {busy === "levels" ? "…" : "Auto levels"}
           </button>
-          <button disabled={disabled || running} onClick={run("stain", () => detectStain())} title="Detect the stain (H&E, H-DAB, special) and apply a matching preset">
+          <button disabled={disabled || running} aria-label={busy === "stain" ? "Detect stain, working" : undefined} aria-describedby="adj-readout" onClick={run("stain", () => detectStain())} title="Detect the stain (H&E, H-DAB, special) and apply a matching preset">
             {busy === "stain" ? "…" : "Detect stain"}
           </button>
-          <button disabled={disabled || running} onClick={run("vectors", estimateVectors)} title="Estimate this slide's stain vectors (Macenko) for stain separation">
+          <button disabled={disabled || running} aria-label={busy === "vectors" ? "Estimate vectors, working" : undefined} aria-describedby="adj-readout" onClick={run("vectors", estimateVectors)} title="Estimate this slide's stain vectors (Macenko) for stain separation">
             {busy === "vectors" ? "…" : "Estimate vectors"}
           </button>
           <button
             className={params.normalize ? "on" : ""}
             aria-pressed={params.normalize}
             disabled={disabled || running}
+            aria-label={busy === "norm" ? "Normalise, working" : "Normalise"}
             onClick={run("norm", () => normalise())}
-            title="Normalise colours to a reference H&E (Macenko)"
+            title={params.normalize ? "Normalised: click again to turn it off" : "Normalise colours to a reference H&E (Macenko). Click again, or Undo, to turn it off"}
           >
             {busy === "norm" ? "…" : params.normalize ? "Normalised ✓" : "Normalise"}
           </button>
@@ -258,8 +297,80 @@ export function AdjustPanel() {
         <Slider label="Radius" value={params.sharpenRadius} def={1} min={0.5} max={5} step={0.1} digits={1} unit="px" hint="Unsharp mask radius in screen pixels" onChange={(v) => set({ sharpenRadius: v })} disabled={disabled || params.sharpen === 0} />
       </Section>
 
+      <Section
+        title="Rotate"
+        aside={
+          rotation !== 0 ? (
+            <button className="btn ghost small" onClick={() => rotateTo(0)} title="Straighten the slide again">
+              Reset
+            </button>
+          ) : undefined
+        }
+      >
+        <Slider
+          label="Angle"
+          value={signedDeg(rotation)}
+          def={0}
+          min={-180}
+          max={180}
+          step={0.5}
+          digits={1}
+          unit="°"
+          hint="Tilt the whole slide (the overview map turns with it; annotations stay where they are on the tissue)"
+          onChange={(v) => rotateTo(v)}
+          disabled={disabled}
+        />
+        <div className="adj-rot">
+          <button className="btn" disabled={disabled} onClick={() => rotateStep(90, -1)} title="Rotate left 90° (,)">
+            ⟲ 90°
+          </button>
+          <button className="btn" disabled={disabled} onClick={() => rotateTo(signedDeg(rotation) - 1)} title="1° left">
+            −1°
+          </button>
+          <button className="btn" disabled={disabled} onClick={() => rotateTo(signedDeg(rotation) + 1)} title="1° right">
+            +1°
+          </button>
+          <button className="btn" disabled={disabled} onClick={() => rotateStep(90, 1)} title="Rotate right 90° (.)">
+            90° ⟳
+          </button>
+        </div>
+        <div className="adj-sub">
+          <span className="muted small">Perspective</span>
+          {tilted && (
+            <button className="btn ghost small" onClick={() => useStore.getState().setView({ tiltX: 0, tiltY: 0 })} title="Look straight down again">
+              Straighten
+            </button>
+          )}
+        </div>
+        <Slider
+          label="Tip forward"
+          value={tiltX}
+          def={0}
+          min={-60}
+          max={60}
+          step={1}
+          unit="°"
+          hint="Look at the slide at an angle, as if tipping the glass towards or away from you"
+          onChange={(v) => useStore.getState().setView({ tiltX: v })}
+          disabled={disabled}
+        />
+        <Slider
+          label="Tip sideways"
+          value={tiltY}
+          def={0}
+          min={-60}
+          max={60}
+          step={1}
+          unit="°"
+          hint="Tip the slide to the left or right"
+          onChange={(v) => useStore.getState().setView({ tiltY: v })}
+          disabled={disabled}
+        />
+        {tilted && <p className="muted small adj-note">Viewing only while tilted: pan and zoom work, but annotations and the scale bar come back when you straighten it.</p>}
+      </Section>
+
       <Section title="Stain separation">
-        <div className="seg wide adj-seg">
+        <div className="seg wide adj-seg" role="group" aria-label="Stain separation">
           {(
             [
               ["none", "Off"],
@@ -267,17 +378,24 @@ export function AdjustPanel() {
               ["hdab", "H-DAB"],
             ] as [StainMode, string][]
           ).map(([m, l]) => (
-            <button key={m} className={mode === m ? "on" : ""} disabled={disabled} onClick={() => setMode(m)}>
+            <button key={m} className={mode === m ? "on" : ""} aria-pressed={mode === m} disabled={disabled} onClick={() => setMode(m)}>
               {l}
             </button>
           ))}
         </div>
         {mode !== "none" && (
           <>
-            <div className="seg wide adj-seg">
+            <div className="seg wide adj-seg" role="group" aria-label="Stain channel">
               {[-1, 0, 1].map((c) => (
-                <button key={c} className={st.channel === c ? "on" : ""} onClick={() => set({ stain: { ...st, channel: c } })} title={c < 0 ? "Recombine the separated stains (drops the residual)" : `Show ${names[c]} only`}>
-                  {c < 0 ? "All" : names[c]}
+                <button
+                  key={c}
+                  className={st.channel === c ? "on" : ""}
+                  aria-pressed={st.channel === c}
+                  aria-label={c < 0 ? "All stains" : `${names[c]} only`}
+                  onClick={() => set({ stain: { ...st, channel: c } })}
+                  title={c < 0 ? "Recombine the separated stains (drops the residual)" : `Show ${names[c]} only`}
+                >
+                  {c < 0 ? "All" : shortStain(names[c])}
                 </button>
               ))}
             </div>

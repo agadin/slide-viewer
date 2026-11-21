@@ -11,7 +11,9 @@ Slides scanned on different days, or stained in different labs, can look very di
 Changes apply straight away, and panning and zooming stay smooth because the work happens on the graphics card. They're included in [snapshots](viewing.md#snapshot). Each slide keeps its own adjustments while the app is open, so you can switch slides and come back without losing them. A slide you haven't adjusted opens unchanged (unless an Auto step is set to run on open; see [Run automatically](#run-automatically)).
 
 - Press **\\** on the slide, or flip the **Adjustments** switch at the top of the tab, to compare with the original image.
-- **Reset** puts everything back.
+- **Undo** steps back the last change: a slider, a preset, or an Auto button such as **Normalise** or **Estimate vectors**. Press it again to go further back. **⌘Z** does the same while you're in the Adjust tab (on the slide, ⌘Z undoes annotations).
+- **Reset** puts everything back (and **Undo** brings your settings back again).
+- **Normalise** is a switch: click **Normalised ✓** again to turn it off.
 - Double-click a slider or its label to put just that one back. You can also type a value in the box beside it.
 
 ## The sliders
@@ -37,6 +39,14 @@ An unsharp mask. **Amount** sets the strength, and **Radius** sets the size of t
 ### Presets
 
 One click sets a complete look: **Crisp**, **Pale**, **Dark**, **Nuclei**, **Eosin**, **DAB**, **Grey** and **Inverted**. A preset replaces the current tone and colour settings, but keeps Auto levels and normalisation.
+
+## Rotate
+
+Tilt the whole slide to line a structure up: drag **Angle** (−180° to 180°, in half degrees) or type a number, or use the **⟲ 90°**, **−1°**, **+1°** and **90° ⟳** buttons. **Reset** straightens it again. The overview map turns with the slide, and annotations stay where they are on the tissue (rotation is a way of looking, not a change to the slide or its `.ndpa`). The **,** and **.** keys turn 90°, and **⇧,** / **⇧.** turn by the small step.
+
+### Perspective
+
+**Tip forward** and **Tip sideways** (−60° to 60°) show the slide at an angle, as if you tipped the glass instead of looking straight down. It's a way of looking only. While the slide is tilted, panning and zooming work, but you can't place or edit annotations, and the scale bar is hidden because lengths differ across a tipped view. **Straighten** (also in the right-click menu) brings everything back. Opening another slide starts it straight.
 
 ## Stain separation
 

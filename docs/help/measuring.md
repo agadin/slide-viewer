@@ -8,7 +8,7 @@ order: 4
 
 ## The ruler
 
-1. Press **R** (or click the ruler in the toolbar).
+1. Press **R**, or right-click the slide and choose **Measure (ruler)**.
 2. Drag from one end of what you're measuring to the other. The length shows on the line as you drag, in µm, or in mm once it's longer than 1 mm.
 3. Let go. The ruler stays on the slide as an annotation, listed in the Annotations tab with its length, and it's saved in the `.ndpa` file (NDP.view2 shows it as a ruler too).
 

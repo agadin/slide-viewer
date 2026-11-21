@@ -43,7 +43,7 @@ Hide the browser to give the slide more room: click **Slides** at the top left, 
 ![The Slide Viewer window: the slide browser on the left, the slide with its overview map, zoom presets, scale bar and tools in the middle, and the Annotations tab on the right](img/window.jpg)
 
 - **Top bar**: the slide's name, **?** for this help, the preferences button, and **Panel**, which shows or hides the panel on the right.
-- **Centre**: the slide itself, with the overview map, scale bar and zoom buttons over it (see [Viewing a slide](viewing.md)). The toolbar with the pan, pin, ruler and shape tools floats at the bottom.
+- **Centre**: the slide itself, with the overview map, scale bar and zoom buttons over it (see [Viewing a slide](viewing.md)). Right-click the slide to add a pin or flag, draw a shape, or change the zoom.
 - **Right panel**: two tabs. **Annotations** lists the pins and shapes on this slide (see [Pins and shapes](annotating.md)). **Adjust** has the image adjustments and stain tools (see [Adjustments and stains](adjustments-and-stains.md)). Show or hide it with **⌥⌘2** (Ctrl+Alt+2).
 
 ## Preferences

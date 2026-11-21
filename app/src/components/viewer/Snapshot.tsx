@@ -252,8 +252,11 @@ export function Snapshot() {
       <p className="help">The visible part of the slide, with the current adjustments{o.annotations ? " and annotations" : ""}.</p>
       <div className="rows">
         <div className="row">
-          <span className="lbl">Resolution</span>
-          <Seg
+          <span className="lbl" id="sv-snap-res">
+            Resolution
+          </span>
+          <div role="group" aria-labelledby="sv-snap-res" style={{ display: "contents" }}>
+            <Seg
             value={String(o.scale)}
             options={[
               ["1", "1×"],
@@ -261,13 +264,16 @@ export function Snapshot() {
               ["4", "4×"],
             ]}
             onChange={(v) => setOpt({ scale: Number(v) })}
-          />
-          <span className="size">
+            />
+          </div>
+          <span className="size" aria-live="polite">
             {outW} × {outH} px
           </span>
         </div>
         <div className="row">
-          <span className="lbl">Include</span>
+          <span className="lbl" aria-hidden>
+            Include
+          </span>
           <Check checked={o.annotations} onChange={(v) => setOpt({ annotations: v })}>
             annotations
           </Check>
@@ -293,6 +299,7 @@ export function Snapshot() {
               }
             }}
             placeholder="Title on the image"
+            aria-label="Title on the image"
           />
         </div>
       </div>

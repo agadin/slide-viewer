@@ -11,6 +11,7 @@ The **Slides** sidebar on the left lists every slide in a folder and all of its 
 ## Choose a folder
 
 - Click **Choose Folder…** in the sidebar, or choose **File ▸ Open Folder…** (**⌘O**). Pick the folder that holds your course's slides. It can be a folder of folders, for example one per week or per organ system.
+- To look at just one file, choose **File ▸ Open Slide…** (**⇧⌘O**), or click the folder name at the top of the browser and pick **Open a Single Slide…**. That menu also has **Choose Folder…** and **Rescan This Folder**.
 - To change folders, click the folder's name at the top of the sidebar.
 - To look at one slide that isn't in the folder, click **Open a Single Slide…** (shown before you choose a folder).
 
@@ -71,5 +72,6 @@ Anywhere in the app, **]** (or **→** when the list isn't selected) opens the n
 In **Preferences ▸ Slide browser**:
 
 - **Thumbnails**: *Off* (a compact list of names), *Small*, *Medium* or *Large*.
+- **When a slide opens**: hide the slide browser automatically, separately for a slide **picked from the list** and one opened with **File ▸ Open…**. Click **Slides** in the top bar to bring it back.
 - **Reopen the last folder** and **Reopen the slide I was looking at** when the app starts.
 - **Forget** the last folder, or the folders you closed.

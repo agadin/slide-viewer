@@ -18,7 +18,7 @@ Tiles load as you move: a blurry patch sharpens a moment later. The first view o
 
 ## The toolbar
 
-The pill at the bottom of the slide holds the tools and view controls.
+The tool bar is off by default: right-click the slide instead (see [Pins and shapes](annotating.md#the-right-click-menu)). Turn it on in **Preferences ▸ Viewing ▸ tool bar** to get this pill at the bottom of the slide:
 
 | Button | Key | What it does |
 | --- | --- | --- |
@@ -37,11 +37,15 @@ The pill at the bottom of the slide holds the tools and view controls.
 
 ## The overview map
 
-The card in the top-left corner shows the whole slide, turned the same way as your view. The orange box is what you can see. **Click** or **drag** on the map to move there; **scroll** on it to zoom. Pins show as small dots. Hide it in **Preferences ▸ Viewing** if you want the space.
+The card in the top-left corner shows the whole slide, turned the same way as your view. The blue box is what you can see. **Click** or **drag** on the map to move there; **scroll** on it to zoom. Pins show as small dots. Press **M** to hide or show it (or use **Preferences ▸ Viewing**).
+
+**Move** the map by dragging its top edge (a grip appears when you hover), and **resize** it by dragging its bottom-right corner. Double-click either to put it back. **Preferences ▸ Viewing ▸ Overview map size** does the same with a slider, and **Reset Map** puts it back in the top-left corner.
 
 ## Magnification and zoom presets
 
-The card in the top-right shows the current magnification and buttons for **Fit, 1.25×, 2.5×, 5×, 10×, 20×** and **40×**, the magnifications you know from the microscope.
+Right-click the slide and hover **Zoom** to fit the slide, zoom in or out, or jump to **1.25×, 2.5×, 5×, 10×, 20×** or **40×**, the magnifications you know from the microscope. The current one is ticked.
+
+To keep these as buttons in the top-right corner with a live magnification readout, turn on **Preferences ▸ Viewing ▸ zoom bar**.
 
 Magnification on a screen is an approximation. Slide Viewer uses the same rule as NDP.view2: **10× means 1 µm per screen pixel**, so 40× is 0.25 µm per pixel.
 
@@ -51,7 +55,7 @@ Images without a pixel size (plain JPEG or PNG files, some TIFFs) are marked **u
 
 ## Scale bar
 
-The bar in the bottom-left corner shows a round length (1, 2 or 5 × 10ⁿ µm or mm, for example **100 µm** or **1 mm**) and follows the zoom as you move. Use it to judge sizes at a glance; for an exact length use the [ruler](measuring.md#the-ruler). On an uncalibrated image it shows pixels.
+The bar in the bottom-left corner (move it to any corner in **Preferences ▸ Viewing ▸ Scale bar position**) shows a round length (1, 2 or 5 × 10ⁿ µm or mm, for example **100 µm** or **1 mm**) and follows the zoom as you move. Use it to judge sizes at a glance; for an exact length use the [ruler](measuring.md#the-ruler). On an uncalibrated image it shows pixels.
 
 ## Rotate
 
@@ -80,13 +84,14 @@ The picture uses your current [adjustments](adjustments-and-stains.md) and rotat
 
 ## Moving between slides
 
-**]** or **→** opens the next slide in the browser list and **[** or **←** the previous one. Your annotations on the slide you leave are saved first. When you're searching in the browser, these keys step only through the matches. The app tells you when you reach the first or last slide.
+**]** or **→** opens the next slide in the browser list and **[** or **←** the previous one (while the [keyboard cursor](accessibility.md#keyboard-only) is on, the arrows pan the slide and only **[** and **]** change slides). Your annotations on the slide you leave are saved first. When you're searching in the browser, these keys step only through the matches. The app tells you when you reach the first or last slide.
 
 ## Keyboard
 
 | Key | Action |
 | --- | --- |
-| **[** / **]** or **←** / **→** | Previous / next slide |
+| **[** / **]** or **←** / **→** | Previous / next slide (with the keyboard cursor on, the arrows pan instead) |
+| **X** | Keyboard cursor on / off (see [Keyboard only](accessibility.md#keyboard-only)) |
 | **⇧←** **⇧→** **⇧↑** **⇧↓** | Pan a quarter screen |
 | **+** / **−** | Zoom in / out |
 | **0**, **H** or **⌘0** | Fit the whole slide |

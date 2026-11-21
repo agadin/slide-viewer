@@ -109,8 +109,14 @@ export interface ViewSlice {
   magnification: number | null;
   /** bump to fit the whole slide */
   homeNonce: number;
+  /** 3D perspective tilt of the whole slide plane, degrees (Adjust ▸ Rotate ▸ Perspective). View only:
+   *  while either is non-zero, annotations can't be placed or edited (pointer positions don't map) */
+  tiltX: number;
+  tiltY: number;
 }
-const initialView: ViewSlice = { rotation: 0, z: 0, zoom: 1, umPerScreenPx: null, magnification: null, homeNonce: 0 };
+/** the slide is tipped in 3D (see ViewSlice.tiltX / tiltY) */
+export const isTilted = (v: Pick<ViewSlice, "tiltX" | "tiltY">) => Math.abs(v.tiltX) > 0.05 || Math.abs(v.tiltY) > 0.05;
+const initialView: ViewSlice = { rotation: 0, z: 0, zoom: 1, umPerScreenPx: null, magnification: null, homeNonce: 0, tiltX: 0, tiltY: 0 };
 
 // ---------------------------------------------------------------- ui (shared)
 export type PanelTab = "annotations" | "adjust";
@@ -119,7 +125,13 @@ export interface MenuItemSpec {
   shortcut?: string;
   danger?: boolean;
   disabled?: boolean;
-  onSelect: () => void;
+  /** shows a check mark in the icon column */
+  checked?: boolean;
+  /** a colour dot in the icon column */
+  swatch?: string;
+  /** opens a second menu beside this item on hover (or →); onSelect is then optional */
+  submenu?: (MenuItemSpec | "sep")[];
+  onSelect?: () => void;
 }
 export interface ContextMenuState {
   x: number;

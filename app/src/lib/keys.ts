@@ -7,10 +7,18 @@
  *   +  −             zoom in / out                         ⇧ arrows   pan
  *   ,  .             rotate 90° left / right               ⇧, ⇧.      rotate by the free step (15°)
  *   PageUp/PageDown  focal plane up / down (z-stacks)      ⇧S         save a snapshot
+ *   X                keyboard cursor on / off              N  ⇧N      select the next / previous annotation
+ *   ← → ↑ ↓          with the keyboard cursor on (and the slide focused): pan a tenth of the view, ⇧ a quarter
+ *                    (otherwise ← → step slides, as [ ] always do)
+ *
+ * The rest of the keyboard cursor (Space / ↵ set points, P pin, ⌥ arrows nudge, ⇧F10 menu, F2 rename)
+ * lives in AnnotationLayer.tsx; every key is listed in KEYBOARD_KEYS below.
  *
  * Feature components with keys of their own (the annotation layer's Delete, Enter, Esc while drawing)
  * listen with { capture: true } and call preventDefault(); this hook runs in the bubble phase and
  * skips events that are already handled, typed into fields, or arrive while a context menu is open.
+ * With Preferences ▸ Accessibility ▸ "single-key shortcuts only on the slide" on, character keys are
+ * ignored unless the slide has the focus (characterKeyBlocked, WCAG 2.1.4); ⌘/Ctrl shortcuts always work.
  * `keyAction` is pure (tested in tests/viewer.test.ts); `useGlobalKeys` dispatches it.
  */
 import { useEffect } from "react";
@@ -20,7 +28,9 @@ import { TOOLS, type Tool } from "./types";
 import { stepSlide } from "./browser";
 import { fireMenu, useMenuEvent } from "./menu";
 import { normDeg, snapRotate } from "../components/viewer/viewMath";
-import { panByScreen, zoomBy } from "../components/viewer/viewerHandle";
+import { getActiveViewer, panByScreen, zoomBy } from "../components/viewer/viewerHandle";
+import { announce, describeAnnotation } from "./announce";
+import { cycleAnnotation, KB_PAN_BIG, KB_PAN_STEP, requestJump, setKbCursor, useAnnUi } from "./annotations";
 
 const typing = (t: EventTarget | null) => {
   const el = t as HTMLElement | null;
@@ -75,12 +85,45 @@ export type KeyAction =
   | { kind: "delete" }
   | { kind: "slide"; dir: 1 | -1 }
   | { kind: "fit" }
+  | { kind: "map" }
   | { kind: "zoom"; factor: number }
   | { kind: "pan"; fx: number; fy: number }
   | { kind: "rotate90"; dir: 1 | -1 }
   | { kind: "rotateFree"; dir: 1 | -1 }
   | { kind: "plane"; dir: 1 | -1 }
-  | { kind: "snapshot" };
+  | { kind: "snapshot" }
+  | { kind: "cursor" }
+  | { kind: "cycle"; dir: 1 | -1 };
+
+/** what the key handler knows besides the key */
+export interface KeyContext {
+  /** the keyboard cursor is on and the slide (or nothing) has the focus: arrows pan instead of stepping slides */
+  cursor?: boolean;
+}
+
+/**
+ * Keys for keyboard-only use (a11y), as data for the shortcuts page / Help. `where` says when they work.
+ * Single letters work when the focus isn't in a text field.
+ */
+export const KEYBOARD_KEYS: { keys: string; action: string; where?: string }[] = [
+  { keys: "X", action: "Keyboard cursor on / off (a cross-hair at the centre of the view)" },
+  { keys: "↵ (slide focused)", action: "Keyboard cursor on" },
+  { keys: "← → ↑ ↓", action: "Pan a tenth of the view under the cursor", where: "keyboard cursor on" },
+  { keys: "⇧ + arrow", action: "Pan a quarter of the view" },
+  { keys: "[ ]", action: "Previous / next slide (← → too while the keyboard cursor is off)" },
+  { keys: "Space", action: "Click at the cursor: select what's under it, place a pin, or set a point", where: "keyboard cursor on" },
+  { keys: "↵", action: "Pan tool: open the menu at the cursor. Drawing tools: set a point", where: "keyboard cursor on" },
+  { keys: "P / ⇧P", action: "Place a pin / flag at the cursor", where: "keyboard cursor on" },
+  { keys: "R C B, then Space twice", action: "Ruler, circle (centre, then edge) or rectangle (corner to corner)", where: "keyboard cursor on" },
+  { keys: "F, then Space per point", action: "Freehand outline; ⇧↵ or Space on the first point closes it, ⌫ removes the last point", where: "keyboard cursor on" },
+  { keys: "N / ⇧N", action: "Select the next / previous annotation and show it" },
+  { keys: "⌥ + arrow", action: "Move the selected annotations (⌥⇧ for bigger steps)" },
+  { keys: "F2 or ↵", action: "Rename the selected annotation" },
+  { keys: "⇧F10 or the Menu key", action: "Menu for the selection, or at the cursor (style, colour, delete, add pin, zoom…)" },
+  { keys: "Esc", action: "Cancel the drawing, clear the selection, back to Pan, then keyboard cursor off" },
+  { keys: "Tab", action: "Leave the slide (the slide never keeps the focus)" },
+  { keys: "In menus", action: "↑ ↓ Home End move, letters jump, → or ↵ opens a submenu, ← or Esc closes it, ↵ or Space picks, Tab closes" },
+];
 
 export interface KeyLike {
   key: string;
@@ -91,7 +134,7 @@ export interface KeyLike {
   altKey?: boolean;
 }
 
-export function keyAction(e: KeyLike): KeyAction | null {
+export function keyAction(e: KeyLike, ctx: KeyContext = {}): KeyAction | null {
   const mod = !!(e.metaKey || e.ctrlKey);
   const k = e.key.toLowerCase();
   const code = e.code ?? "";
@@ -102,16 +145,23 @@ export function keyAction(e: KeyLike): KeyAction | null {
   }
   if (mod || e.altKey) return null;
   if (e.shiftKey) {
-    if (k === "arrowleft") return { kind: "pan", fx: -0.25, fy: 0 };
-    if (k === "arrowright") return { kind: "pan", fx: 0.25, fy: 0 };
-    if (k === "arrowup") return { kind: "pan", fx: 0, fy: -0.25 };
-    if (k === "arrowdown") return { kind: "pan", fx: 0, fy: 0.25 };
+    if (k === "arrowleft") return { kind: "pan", fx: -KB_PAN_BIG, fy: 0 };
+    if (k === "arrowright") return { kind: "pan", fx: KB_PAN_BIG, fy: 0 };
+    if (k === "arrowup") return { kind: "pan", fx: 0, fy: -KB_PAN_BIG };
+    if (k === "arrowdown") return { kind: "pan", fx: 0, fy: KB_PAN_BIG };
     if (code === "Comma" || k === "<") return { kind: "rotateFree", dir: -1 };
     if (code === "Period" || k === ">") return { kind: "rotateFree", dir: 1 };
     if (k === "+") return { kind: "zoom", factor: 2 };
     if (k === "s") return { kind: "snapshot" };
+    if (k === "n") return { kind: "cycle", dir: -1 };
     if (k === "_") return { kind: "zoom", factor: 0.5 };
     return null;
+  }
+  if (ctx.cursor) {
+    if (k === "arrowleft") return { kind: "pan", fx: -KB_PAN_STEP, fy: 0 };
+    if (k === "arrowright") return { kind: "pan", fx: KB_PAN_STEP, fy: 0 };
+    if (k === "arrowup") return { kind: "pan", fx: 0, fy: -KB_PAN_STEP };
+    if (k === "arrowdown") return { kind: "pan", fx: 0, fy: KB_PAN_STEP };
   }
   const tool = TOOLS.find((t) => t.key === k);
   if (tool) return { kind: "tool", tool: tool.id };
@@ -130,6 +180,12 @@ export function keyAction(e: KeyLike): KeyAction | null {
     case "h":
     case "0":
       return { kind: "fit" };
+    case "m":
+      return { kind: "map" };
+    case "x":
+      return { kind: "cursor" };
+    case "n":
+      return { kind: "cycle", dir: 1 };
     case "=":
     case "+":
       return { kind: "zoom", factor: 2 };
@@ -173,6 +229,12 @@ export function runKeyAction(a: KeyAction): boolean {
     case "fit":
       zoomToFit();
       return true;
+    case "map": {
+      if (!st.slide.info) return false;
+      const v = useSettings.getState().s.viewer;
+      useSettings.getState().setSection("viewer", { showNavigator: !v.showNavigator });
+      return true;
+    }
     case "zoom":
       zoomBy(a.factor);
       return true;
@@ -194,7 +256,53 @@ export function runKeyAction(a: KeyAction): boolean {
       if (!st.slide.info) return false;
       fireMenu("snapshot");
       return true;
+    case "cursor": {
+      if (!st.slide.info) return false;
+      const on = !useAnnUi.getState().kbCursor;
+      setKbCursor(on);
+      // the slide takes the focus so the arrows, Space and ↵ reach it
+      if (on) getActiveViewer()?.viewer.canvas.focus({ preventScroll: true });
+      return true;
+    }
+    case "cycle": {
+      if (!st.slide.info) return false;
+      const id = cycleAnnotation(st.annotations.items, useAnnUi.getState().hidden, st.annotations.selection, a.dir);
+      if (!id) return false;
+      st.select([id]);
+      requestJump(id);
+      const list = st.annotations.items.filter((x) => !useAnnUi.getState().hidden.includes(x.id));
+      const ann = list.find((x) => x.id === id);
+      if (ann) announce(`${describeAnnotation(ann, { index: list.indexOf(ann), total: list.length, calibrated: st.slide.info.calibrated })}. Selected.`);
+      return true;
+    }
   }
+}
+
+/** a key that types a character (letters, digits, + − , . [ ] Space), with or without Shift (WCAG 2.1.4) */
+export const isCharacterKey = (e: KeyLike) => e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey;
+
+/** is the keyboard focus inside the slide viewer itself (not just nowhere)? */
+export function slideHasFocus(t: EventTarget | null): boolean {
+  if (typeof document === "undefined") return false;
+  const host = getActiveViewer()?.viewer.element;
+  return !!host && !!t && host.contains(t as Node);
+}
+
+/**
+ * Preferences ▸ Accessibility ▸ "Single-key shortcuts only on the slide" (WCAG 2.1.4 character key
+ * shortcuts): true when this key must be ignored because the slide doesn't have the focus.
+ */
+export function characterKeyBlocked(e: KeyLike & { target: EventTarget | null }, onlyOnSlide = !!useSettings.getState().s.a11y?.singleKeysOnSlide): boolean {
+  return onlyOnSlide && isCharacterKey(e) && !slideHasFocus(e.target);
+}
+
+/** is the focus on the slide (or nowhere), so the keyboard cursor's arrows apply? */
+export function focusOnSlide(t: EventTarget | null): boolean {
+  if (typeof document === "undefined") return false;
+  const el = t as Node | null;
+  if (!el || el === document.body || el === document.documentElement) return true;
+  const host = getActiveViewer()?.viewer.element;
+  return !!host && host.contains(el);
 }
 
 export function useGlobalKeys() {
@@ -211,7 +319,8 @@ export function useGlobalKeys() {
       if (e.defaultPrevented || typing(e.target) || useStore.getState().ui.menu) return;
       // a dialog (snapshot, help) owns the keyboard while it's open
       if (document.querySelector(".modal-backdrop")) return;
-      const a = keyAction(e);
+      if (characterKeyBlocked(e)) return;
+      const a = keyAction(e, { cursor: !!useAnnUi.getState().kbCursor && focusOnSlide(e.target) });
       if (!a) return;
       if (runKeyAction(a)) e.preventDefault();
     };

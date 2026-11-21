@@ -10,7 +10,7 @@ import { useStore } from "../lib/store";
 import { basename, revealFile } from "../lib/backend";
 import { fireMenu } from "../lib/menu";
 import {
-  KIND_LABEL,
+  kindLabel,
   deleteAnnotations,
   duplicateTitles,
   measureText,
@@ -24,6 +24,7 @@ import { PIN_COLORS } from "../lib/ndpa";
 import type { Annotation, SaveState } from "../lib/types";
 import { IconExport, IconPencil, IconTrash } from "./icons";
 import "./annotations/annotations.css";
+import { annotationRowName, colorName } from "../lib/announce"; // a11y(semantics)
 
 const EyeIcon = ({ off }: { off: boolean }) => (
   <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden>
@@ -63,12 +64,15 @@ export function AnnotationPanel() {
   return (
     <div className="ann-panel">
       <div className="ann-head">
-        <b>{items.length ? `${items.length} annotation${items.length === 1 ? "" : "s"}` : "No annotations"}</b>
+        <h2 className="sv-h2">
+          <b>{items.length ? `${items.length} annotation${items.length === 1 ? "" : "s"}` : "No annotations"}</b>
+        </h2>
         <span className="grow" />
         {items.length > 0 && (
           <button
             className="tbtn"
             title={allHidden ? "Show all" : "Hide all"}
+            aria-label={allHidden ? "Show all annotations" : "Hide all annotations"}
             onClick={() => useAnnUi.setState({ hidden: allHidden ? [] : items.map((a) => a.id) })}
           >
             <EyeIcon off={allHidden} />
@@ -105,9 +109,18 @@ export function AnnotationPanel() {
           <span className="kbd">F</span> <span className="kbd">C</span> <span className="kbd">B</span> draw shapes. Everything saves automatically next to the slide.
         </p>
       ) : (
-        <ul className="ann-list" ref={listRef}>
-          {items.map((a) => (
-            <Row key={a.id} a={a} selected={selection.includes(a.id)} hidden={hidden.includes(a.id)} dup={dupIds.has(a.id)} calibrated={info.calibrated} />
+        <ul className="ann-list" ref={listRef} aria-label="Annotations">
+          {items.map((a, i) => (
+            <Row
+              key={a.id}
+              a={a}
+              index={i}
+              total={items.length}
+              selected={selection.includes(a.id)}
+              hidden={hidden.includes(a.id)}
+              dup={dupIds.has(a.id)}
+              calibrated={info.calibrated}
+            />
           ))}
         </ul>
       )}
@@ -130,11 +143,28 @@ export function AnnotationPanel() {
   );
 }
 
-function Row({ a, selected, hidden, dup, calibrated }: { a: Annotation; selected: boolean; hidden: boolean; dup: boolean; calibrated: boolean }) {
+function Row({
+  a,
+  index,
+  total,
+  selected,
+  hidden,
+  dup,
+  calibrated,
+}: {
+  a: Annotation;
+  index: number;
+  total: number;
+  selected: boolean;
+  hidden: boolean;
+  dup: boolean;
+  calibrated: boolean;
+}) {
   const [renaming, setRenaming] = useState(false);
   const [colors, setColors] = useState(false);
   const m = measureText(a, calibrated);
-  const select = (e: React.MouseEvent) => {
+  const name = a.title.trim() ? `“${a.title.trim()}”` : "untitled annotation";
+  const select = (e: { shiftKey: boolean; metaKey: boolean }) => {
     const st = useStore.getState();
     const sel = st.annotations.selection;
     if (e.shiftKey || e.metaKey) st.select(sel.includes(a.id) ? sel.filter((x) => x !== a.id) : [...sel, a.id]);
@@ -149,16 +179,34 @@ function Row({ a, selected, hidden, dup, calibrated }: { a: Annotation; selected
         className="ann-swatch"
         style={{ background: a.color }}
         title="Colour"
-        aria-label="Colour"
+        aria-label={`Colour of ${name}: ${colorName(a.color)}. Change`}
+        aria-expanded={colors}
         onClick={(e) => {
           e.stopPropagation();
           setColors((c) => !c);
         }}
       />
-      <div className="ann-main">
+      <div
+        className="ann-main"
+        role={renaming ? undefined : "button"}
+        tabIndex={renaming ? undefined : 0}
+        aria-label={renaming ? undefined : annotationRowName(a, m, { index, total, hidden, duplicate: dup })}
+        aria-current={selected && !renaming ? "true" : undefined}
+        onKeyDown={(e) => {
+          if (renaming || e.target !== e.currentTarget) return;
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            select(e);
+          } else if (e.key === "F2") {
+            e.preventDefault();
+            setRenaming(true);
+          }
+        }}
+      >
         {renaming ? (
           <input
             className="ann-rename"
+            aria-label={`Title of ${name}`}
             autoFocus
             defaultValue={a.title}
             onClick={(e) => e.stopPropagation()}
@@ -180,27 +228,40 @@ function Row({ a, selected, hidden, dup, calibrated }: { a: Annotation; selected
           <span className={`ann-title ${a.title ? "" : "empty"}`} title={a.title}>
             {a.title || "Untitled"}
             {dup && (
-              <span className="ann-dup" title="Another annotation has this title">
+              <span className="ann-dup" title="Another annotation has this title" aria-hidden>
                 ⚠
               </span>
             )}
           </span>
         )}
-        <span className="ann-sub">{[KIND_LABEL[a.kind], m].filter(Boolean).join(" · ")}</span>
+        {" "}
+        <span className="ann-sub">{[kindLabel(a), m].filter(Boolean).join(" · ")}</span>
       </div>
       <div className="ann-actions" onClick={(e) => e.stopPropagation()}>
-        <button className="tbtn" title="Rename (double-click)" aria-label="Rename" onClick={() => setRenaming(true)}>
+        <button className="tbtn" title="Rename (double-click)" aria-label={`Rename ${name}`} onClick={() => setRenaming(true)}>
           <IconPencil />
         </button>
-        <button className="tbtn" title={hidden ? "Show" : "Hide"} aria-label={hidden ? "Show" : "Hide"} onClick={() => toggleHidden(a.id)}>
+        <button className="tbtn" title={hidden ? "Show" : "Hide"} aria-label={`${hidden ? "Show" : "Hide"} ${name}`} onClick={() => toggleHidden(a.id)}>
           <EyeIcon off={hidden} />
         </button>
-        <button className="tbtn" title="Delete" aria-label="Delete" onClick={() => deleteAnnotations([a.id])}>
+        <button
+          className="tbtn"
+          title="Delete"
+          aria-label={`Delete ${name}`}
+          onClick={(e) => {
+            // a11y(audit): the row goes away, so put the focus on the next row (or the previous one, or the
+            // slide) instead of losing it on <body> (WCAG 2.4.3)
+            const li = e.currentTarget.closest("li");
+            const sib = (li?.nextElementSibling ?? li?.previousElementSibling)?.querySelector<HTMLElement>(".ann-main");
+            deleteAnnotations([a.id]);
+            requestAnimationFrame(() => (sib?.isConnected ? sib : document.querySelector<HTMLElement>(".openseadragon-canvas"))?.focus());
+          }}
+        >
           <IconTrash />
         </button>
       </div>
       {colors && (
-        <div className="ann-colors" onClick={(e) => e.stopPropagation()}>
+        <div className="ann-colors" role="group" aria-label={`Colours for ${name}`} onClick={(e) => e.stopPropagation()}>
           {PIN_COLORS.map((c) => (
             <button
               key={c.hex}
@@ -208,11 +269,12 @@ function Row({ a, selected, hidden, dup, calibrated }: { a: Annotation; selected
               style={{ background: c.hex }}
               title={c.name}
               aria-label={c.name}
+              aria-pressed={a.color === c.hex}
               onClick={() => updateAnnotation(a.id, { color: c.hex })}
             />
           ))}
           {a.kind !== "pin" && (
-            <input type="color" value={a.color} title="Any colour" onChange={(e) => updateAnnotation(a.id, { color: e.target.value })} />
+            <input type="color" value={a.color} title="Any colour" aria-label="Any colour" onChange={(e) => updateAnnotation(a.id, { color: e.target.value })} />
           )}
         </div>
       )}
@@ -221,6 +283,7 @@ function Row({ a, selected, hidden, dup, calibrated }: { a: Annotation; selected
           key={`${a.id}:${a.details}`}
           className="ann-details"
           placeholder="Notes (saved with the annotation)"
+          aria-label={`Notes for ${name}`}
           defaultValue={a.details}
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}

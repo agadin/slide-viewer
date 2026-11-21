@@ -12,5 +12,12 @@ import "./formats.test";
 import "./release.test";
 import "./ndpa-oracle.test";
 import "./datasafety.test";
+import "./pinstyle.test";
+import "./adjust-undo.test";
+import "./a11y-semantics.test";
+import "./a11y-keyboard.test";
+
+import "./a11y-visual.test";
+import "./a11y-audit.test";
 
 await run();

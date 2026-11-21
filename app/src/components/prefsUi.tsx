@@ -1,14 +1,20 @@
 /** Building blocks for Preferences panes (shared; used by every feature's prefs pane). */
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 
 /** one labelled row: label | control (+ help text) */
 export function PrefRow({ label, children, help }: { label: string; children: ReactNode; help?: ReactNode }) {
+  // a11y: the row label names the group of controls beside it, so a screen reader says "Text size, group"
+  const id = useId();
   return (
     <div className="prow2">
-      <label>{label}</label>
-      <div className="ctl">
+      <label id={id}>{label}</label>
+      <div className="ctl" role="group" aria-labelledby={id} aria-describedby={help ? `${id}-help` : undefined}>
         {children}
-        {help && <span className="help">{help}</span>}
+        {help && (
+          <span className="help" id={`${id}-help`}>
+            {help}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -17,17 +23,32 @@ export function PrefRow({ label, children, help }: { label: string; children: Re
 export function PrefGroup({ title, children }: { title?: string; children: ReactNode }) {
   return (
     <div className="group">
-      {title && <div className="gt">{title}</div>}
+      {title && (
+        <div className="gt" role="heading" aria-level={3}>
+          {title}
+        </div>
+      )}
       {children}
     </div>
   );
 }
 
-export function Seg<T extends string>({ value, options, onChange }: { value: T; options: [T, ReactNode][]; onChange: (v: T) => void }) {
+export function Seg<T extends string>({
+  value,
+  options,
+  onChange,
+  label,
+}: {
+  value: T;
+  options: [T, ReactNode][];
+  onChange: (v: T) => void;
+  /** a11y: the group's spoken name (a PrefRow already names it) */
+  label?: string;
+}) {
   return (
-    <div className="seg">
+    <div className="seg" role="group" aria-label={label}>
       {options.map(([v, l]) => (
-        <button key={v} className={value === v ? "on" : ""} onClick={() => onChange(v)}>
+        <button key={v} type="button" className={value === v ? "on" : ""} aria-pressed={value === v} onClick={() => onChange(v)}>
           {l}
         </button>
       ))}

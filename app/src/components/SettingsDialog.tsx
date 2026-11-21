@@ -8,7 +8,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useSettings } from "../lib/settings";
 import { hitRef, searchHelp } from "../lib/help";
 import { showHelp } from "../lib/backend";
-import { IconInfo, IconPin, IconSliders, IconTarget, IconKeyboard } from "./icons";
+import { IconInfo, IconPin, IconSliders, IconTarget, IconKeyboard, IconPerson } from "./icons";
 import { AboutPane } from "./AboutPane";
 import { Modal } from "./Modal";
 import { SearchField } from "./controls";
@@ -16,13 +16,16 @@ import { ViewerPrefs } from "./viewer/ViewerPrefs";
 import { AnnotationPrefs } from "./annotations/AnnotationPrefs";
 import { AdjustPrefs } from "./AdjustPanel";
 import { BrowserPrefs } from "./Browser";
+import { AccessibilityPrefs } from "./AccessibilityPrefs"; // a11y(visual)
 
-type Pane = "viewer" | "annotations" | "adjust" | "browser" | "about";
+type Pane = "viewer" | "annotations" | "adjust" | "browser" | "a11y" | "about";
 const PANES: { id: Pane; label: string; icon: ReactNode; lede: string; body: () => ReactNode }[] = [
   { id: "viewer", label: "Viewing", icon: <IconKeyboard />, lede: "Zooming, panning and what shows over the slide.", body: () => <ViewerPrefs /> },
   { id: "annotations", label: "Pins & shapes", icon: <IconPin />, lede: "How new pins and shapes look, and saving.", body: () => <AnnotationPrefs /> },
   { id: "adjust", label: "Adjustments", icon: <IconSliders />, lede: "Image adjustments and automatic stain handling.", body: () => <AdjustPrefs /> },
   { id: "browser", label: "Slide browser", icon: <IconTarget />, lede: "The folder of slides and how it's listed.", body: () => <BrowserPrefs /> },
+  // a11y(visual)
+  { id: "a11y", label: "Accessibility", icon: <IconPerson />, lede: "Text size, contrast, motion, and how pins and shapes are drawn.", body: () => <AccessibilityPrefs /> },
   { id: "about", label: "About", icon: <IconInfo />, lede: "Version, help and updates.", body: () => <AboutPane /> },
 ];
 
@@ -55,8 +58,8 @@ export function SettingsDialog({ onClose, asWindow = false }: { onClose: () => v
 
   const body = (
     <div className="prefs">
-      <nav className="prefs-nav">
-        <SearchField className="prefs-search" value={q} onChange={setQ} onEnter={() => helpHits[0] && void showHelp(hitRef(helpHits[0]))} />
+      <nav className="prefs-nav" aria-label="Preference panes">
+        <SearchField className="prefs-search" ariaLabel="Search preferences and help" onEscape={onClose} value={q} onChange={setQ} onEnter={() => helpHits[0] && void showHelp(hitRef(helpHits[0]))} />
         {q.trim() ? (
           <div className="prefs-results">
             {helpHits.length > 0 && <div className="pr-h">Help</div>}
@@ -70,7 +73,7 @@ export function SettingsDialog({ onClose, asWindow = false }: { onClose: () => v
           </div>
         ) : (
           PANES.map((p) => (
-            <button key={p.id} className={pane === p.id ? "on" : ""} onClick={() => setPane(p.id)}>
+            <button key={p.id} className={pane === p.id ? "on" : ""} aria-current={pane === p.id ? "page" : undefined} onClick={() => setPane(p.id)}>
               {p.icon}
               {p.label}
             </button>
@@ -81,9 +84,9 @@ export function SettingsDialog({ onClose, asWindow = false }: { onClose: () => v
           Reset all
         </button>
       </nav>
-      <div className="prefs-content">
+      <div className="prefs-content" role="region" aria-labelledby="prefs-pane-title">
         <div className="prefs-h">
-          <h2>{meta.label}</h2>
+          <h2 id="prefs-pane-title">{meta.label}</h2>
         </div>
         <p className="lede">{meta.lede}</p>
         {meta.body()}

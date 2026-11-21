@@ -4,7 +4,17 @@ import { clamp } from "../lib/util";
 /** Small controls shared by several screens. */
 
 /** slim slider + numeric field with unit */
-export function SliderRow(p: { label: string; value: number; min: number; max: number; unit: string; onChange: (v: number) => void }) {
+export function SliderRow(p: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  unit: string;
+  onChange: (v: number) => void;
+  /** a11y: the spoken name when the visible label is elsewhere (e.g. a PrefRow's); defaults to `label` */
+  name?: string;
+}) {
+  const name = p.name || p.label || undefined;
   return (
     <div className="prow">
       <span className="plabel">{p.label}</span>
@@ -13,6 +23,8 @@ export function SliderRow(p: { label: string; value: number; min: number; max: n
         min={p.min}
         max={p.max}
         value={p.value}
+        aria-label={name}
+        aria-valuetext={`${p.value}${p.unit === "%" ? " percent" : p.unit === "°" ? " degrees" : p.unit ? ` ${p.unit}` : ""}`}
         onChange={(e) => p.onChange(Number(e.target.value))}
         style={{ ["--fill" as string]: `${((p.value - p.min) / (p.max - p.min)) * 100}%` }}
       />
@@ -22,9 +34,10 @@ export function SliderRow(p: { label: string; value: number; min: number; max: n
           min={p.min}
           max={p.max}
           value={p.value}
+          aria-label={name ? `${name} (${p.unit})` : undefined}
           onChange={(e) => e.target.value !== "" && p.onChange(clamp(Number(e.target.value), p.min, p.max))}
         />
-        <u>{p.unit}</u>
+        <u aria-hidden="true">{p.unit}</u>
       </label>
     </div>
   );
@@ -43,6 +56,8 @@ export function SearchField(p: {
   autoFocus?: boolean;
   title?: string;
   placeholder?: string;
+  /** a11y: the input's spoken name (defaults to the placeholder) */
+  ariaLabel?: string;
   inputRef?: RefObject<HTMLInputElement | null>;
 }) {
   return (
@@ -55,6 +70,7 @@ export function SearchField(p: {
         ref={p.inputRef}
         autoFocus={p.autoFocus}
         placeholder={p.placeholder ?? "Search"}
+        aria-label={p.ariaLabel ?? p.placeholder ?? "Search"}
         value={p.value}
         onChange={(e) => p.onChange(e.target.value)}
         onKeyDown={(e) => {

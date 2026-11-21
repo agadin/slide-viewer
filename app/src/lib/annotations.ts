@@ -10,13 +10,14 @@
  *   space (the canvas' CSS px; `opts.scale` = device pixel ratio). Snapshot calls it to burn them into PNGs.
  */
 import { create } from "zustand";
-import type { Annotation, AnnotationKind, PtNm } from "./types";
+import type { Annotation, AnnotationKind, PinStyle, PtNm } from "./types";
 import type { ViewerCoords } from "./viewerContext";
 import type { Pt } from "./coords";
 import { uid } from "./util";
 import { useStore } from "./store";
 import { area, dist, fmtArea, fmtLength, perimeter } from "./measure";
 import { anchorOf, nearestPinColor, newSource, nextNdpaId, type NdpaDocument } from "./ndpa";
+import { annotationStyle, colorName, type AnnotationStyle } from "./a11y"; // a11y(visual)
 
 /** a new app-local annotation id */
 export const newAnnotationId = () => `a${uid()}`;
@@ -32,14 +33,19 @@ export interface AnnUiState {
   loadError: string | null;
   /** ask the viewer to show an annotation (the panel lives outside the viewer) */
   jump: { id: string; nonce: number } | null;
+  /** a11y(keyboard): the keyboard cursor (a reticle fixed at the view centre; X toggles it) */
+  kbCursor?: boolean;
 }
-export const useAnnUi = create<AnnUiState>(() => ({ hidden: [], notice: null, loadError: null, jump: null }));
+export const useAnnUi = create<AnnUiState>(() => ({ hidden: [], notice: null, loadError: null, jump: null, kbCursor: false }));
 
 export const toggleHidden = (id: string) =>
   useAnnUi.setState((s) => ({ hidden: s.hidden.includes(id) ? s.hidden.filter((x) => x !== id) : [...s.hidden, id] }));
 export const requestJump = (id: string) => useAnnUi.setState((s) => ({ jump: { id, nonce: (s.jump?.nonce ?? 0) + 1 } }));
 
 // ================================================================ labels and measurements
+
+/** "Pin", "Flag", "Ruler", …: what the list and announcements call an annotation */
+export const kindLabel = (a: Pick<Annotation, "kind" | "pinStyle">) => (a.kind === "pin" && a.pinStyle === "flag" ? "Flag" : KIND_LABEL[a.kind]);
 
 export const KIND_LABEL: Record<AnnotationKind, string> = {
   pin: "Pin",
@@ -122,7 +128,7 @@ export function boundsNm(a: Pick<Annotation, "points" | "radiusNm">): { x0: numb
 export function makeAnnotation(
   kind: AnnotationKind,
   points: PtNm[],
-  o: { color: string; items: readonly Annotation[]; doc?: unknown; title?: string; radiusNm?: number; closed?: boolean; lens?: number | null; z?: number },
+  o: { color: string; items: readonly Annotation[]; doc?: unknown; title?: string; radiusNm?: number; closed?: boolean; lens?: number | null; z?: number; pinStyle?: PinStyle },
 ): Annotation {
   const color = kind === "pin" ? nearestPinColor(o.color).hex : o.color;
   const a: Annotation = {
@@ -136,6 +142,7 @@ export function makeAnnotation(
     source: newSource(o.lens ?? null, o.z ?? 0),
   };
   if (kind === "circle") a.radiusNm = Math.round(o.radiusNm ?? 0);
+  if (kind === "pin" && o.pinStyle === "flag") a.pinStyle = "flag";
   if (kind === "freehand" || kind === "rectangle") a.closed = kind === "rectangle" ? true : (o.closed ?? true);
   return a;
 }
@@ -171,11 +178,69 @@ export const renameAnnotation = (id: string, title: string) => updateAnnotation(
 /** can this annotation's geometry be edited here? (NDP.view types we don't model are kept as they are) */
 export const editable = (a: Pick<Annotation, "kind">) => a.kind !== "other";
 
+// ================================================================ keyboard operation (a11y: WCAG 2.1.1)
+// Pure helpers behind the keyboard cursor in AnnotationLayer.tsx and N / ⇧N in lib/keys.ts.
+
+/** the keyboard cursor on / off */
+export const setKbCursor = (on: boolean) => useAnnUi.setState({ kbCursor: on });
+
+/** pan steps (fractions of the view) while the keyboard cursor is on: arrows, ⇧ arrows */
+export const KB_PAN_STEP = 0.1;
+export const KB_PAN_BIG = 0.25;
+/** nudge steps for the selection (screen px): ⌥ arrows, ⌥⇧ arrows */
+export const KB_NUDGE_PX = 5;
+export const KB_NUDGE_BIG_PX = 25;
+
+/**
+ * the next (dir 1) or previous (dir -1) annotation to select when stepping through them with N / ⇧N:
+ * list order, hidden ones skipped, wrapping round; from no selection N picks the first and ⇧N the last
+ */
+export function cycleAnnotation(
+  list: readonly Pick<Annotation, "id">[],
+  hidden: readonly string[],
+  selection: readonly string[],
+  dir: 1 | -1,
+): string | null {
+  const hid = new Set(hidden);
+  const ids = list.map((a) => a.id).filter((id) => !hid.has(id));
+  if (!ids.length) return null;
+  const cur = selection.length ? ids.indexOf(selection[selection.length - 1]) : -1;
+  if (cur < 0) return dir > 0 ? ids[0] : ids[ids.length - 1];
+  return ids[(cur + dir + ids.length) % ids.length];
+}
+
+/** a two-point shape (keyboard cursor: first point, second point) */
+export function shapeFromPoints(tool: "ruler" | "circle" | "rectangle", a: PtNm, b: PtNm): { points: PtNm[]; radiusNm?: number } {
+  if (tool === "ruler") return { points: roundPts([a, b]) };
+  if (tool === "circle") return { points: roundPts([a]), radiusNm: Math.max(1, Math.round(dist(a, b))) };
+  return { points: rectFrom(a, b) };
+}
+
+/** move the annotations with these ids by (dx, dy) nm; the ones that can't be edited stay put */
+export function nudgeAnnotations(list: readonly Annotation[], ids: readonly string[], dx: number, dy: number): Annotation[] {
+  const sel = new Set(ids);
+  return list.map((a) => (sel.has(a.id) && editable(a) ? moveBy(a, dx, dy) : a));
+}
+
+/** move the selection by (dx, dy) nm as one undo step; false when nothing could move */
+export function nudgeSelection(dx: number, dy: number): boolean {
+  const st = useStore.getState();
+  const ids = st.annotations.selection;
+  if (!ids.length || (!dx && !dy)) return false;
+  const cur = st.annotations.items;
+  const next = nudgeAnnotations(cur, ids, dx, dy);
+  if (next.every((a, i) => a === cur[i])) return false;
+  st.commit(next);
+  return true;
+}
+
 // ================================================================ screen-space hit testing
 
 /** pin look (NDP.view's push-pin): needle tip at the point, head up and to the right */
 export const PIN_SIZE = 20;
-export const pinHead = (p: Pt, size = PIN_SIZE): Pt => ({ x: p.x + size * 0.62, y: p.y - size * 0.62 });
+/** the grab point of a pin's icon: the ball of a push-pin, the middle of a flag's cloth */
+export const pinHead = (p: Pt, size = PIN_SIZE, style?: PinStyle): Pt =>
+  style === "flag" ? { x: p.x + size * 0.31, y: p.y - size * 0.84 } : { x: p.x + size * 0.62, y: p.y - size * 0.62 };
 
 const distToSeg = (p: Pt, a: Pt, b: Pt) => {
   const dx = b.x - a.x, dy = b.y - a.y;
@@ -234,8 +299,9 @@ export function hitTest(
     const a = vis[i];
     const s = a.points.map((q) => coords.nmToScreen(q));
     if (a.kind === "pin") {
-      const head = pinHead(s[0]);
-      if (Math.hypot(p.x - head.x, p.y - head.y) <= PIN_SIZE * 0.45 || distToSeg(p, s[0], head) <= tol) return { id: a.id, part: "edge" };
+      const ps = PIN_SIZE * annotationStyle().pinScale; // a11y(visual): larger pins are hit where they're drawn
+      const head = pinHead(s[0], ps, a.pinStyle);
+      if (Math.hypot(p.x - head.x, p.y - head.y) <= ps * 0.45 || distToSeg(p, s[0], head) <= tol) return { id: a.id, part: "edge" };
       continue;
     }
     if (a.kind === "circle") {
@@ -273,7 +339,52 @@ export interface PaintOptions {
 
 const INK = "rgba(18,18,18,0.9)";
 const FONT = '500 12px "IBM Plex Sans", -apple-system, "Segoe UI", sans-serif';
-const SEL = "#f4c04e";
+const SEL = "#8cc8ff";
+
+/** NDP.view-style flag: pole foot at (x, y), the flag waving off the top of the pole */
+export function drawFlag(ctx: CanvasRenderingContext2D, x: number, y: number, color: string, size = PIN_SIZE, selected = false) {
+  const top = y - size * 1.05;
+  const w = size * 0.62, h = size * 0.42;
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  if (selected) {
+    ctx.beginPath();
+    ctx.ellipse(x + w * 0.45, top + h * 0.5, w * 0.75 + 3, h * 0.75 + 3, 0, 0, Math.PI * 2);
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = SEL;
+    ctx.stroke();
+  }
+  // pole
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x, top);
+  ctx.lineWidth = 2.6;
+  ctx.strokeStyle = "rgba(255,255,255,0.55)";
+  ctx.stroke();
+  ctx.lineWidth = 1.4;
+  ctx.strokeStyle = "#3a3a3a";
+  ctx.stroke();
+  // cloth, with a slight wave
+  ctx.beginPath();
+  ctx.moveTo(x, top);
+  ctx.quadraticCurveTo(x + w * 0.5, top - h * 0.18, x + w, top + h * 0.08);
+  ctx.lineTo(x + w, top + h * 0.92);
+  ctx.quadraticCurveTo(x + w * 0.5, top + h * 0.82, x, top + h);
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.lineWidth = 1.1;
+  ctx.strokeStyle = INK;
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** a pin in its NDP.view icon style */
+export function drawPinStyled(ctx: CanvasRenderingContext2D, style: PinStyle | undefined, x: number, y: number, color: string, size = PIN_SIZE, selected = false) {
+  if (style === "flag") drawFlag(ctx, x, y, color, size, selected);
+  else drawPin(ctx, x, y, color, size, selected);
+}
 
 /** NDP.view-style push-pin, needle tip at (x, y) */
 export function drawPin(ctx: CanvasRenderingContext2D, x: number, y: number, color: string, size = PIN_SIZE, selected = false) {
@@ -312,39 +423,66 @@ export function drawPin(ctx: CanvasRenderingContext2D, x: number, y: number, col
 }
 
 /** a text label in a dark pill; (x, y) = left middle */
-export function drawLabel(ctx: CanvasRenderingContext2D, x: number, y: number, lines: string[], accent?: string) {
+export function drawLabel(ctx: CanvasRenderingContext2D, x: number, y: number, lines: string[], accent?: string, st?: Partial<AnnotationStyle>) {
   const ls = lines.filter(Boolean);
   if (!ls.length) return;
   ctx.save();
-  ctx.font = FONT;
+  // a11y(visual): label size and a solid background from Preferences ▸ Accessibility
+  const k = st?.labelScale ?? 1;
+  ctx.font = k === 1 ? FONT : FONT.replace("12px", `${12 * k}px`);
   ctx.textBaseline = "middle";
-  const w = Math.max(...ls.map((l) => ctx.measureText(l).width)) + 12;
-  const lh = 16;
-  const h = ls.length * lh + 4;
+  const w = Math.max(...ls.map((l) => ctx.measureText(l).width)) + 12 * k;
+  const lh = 16 * k;
+  const h = ls.length * lh + 4 * k;
   const top = y - h / 2;
-  ctx.fillStyle = "rgba(14,14,16,0.72)";
+  ctx.fillStyle = st?.solidLabels ? "#000" : "rgba(14,14,16,0.72)";
   ctx.beginPath();
   if (typeof ctx.roundRect === "function") ctx.roundRect(x, top, w, h, 6);
   else ctx.rect(x, top, w, h);
   ctx.fill();
+  if (st?.solidLabels) {
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(255,255,255,0.85)";
+    ctx.stroke();
+  }
   if (accent) {
     ctx.fillStyle = accent;
     ctx.fillRect(x, top + 4, 2, h - 8);
   }
   ls.forEach((l, i) => {
     ctx.fillStyle = i === 0 ? "rgba(255,255,255,0.95)" : "rgba(240,240,248,0.75)";
-    ctx.fillText(l, x + 7, top + 2 + lh * i + lh / 2);
+    ctx.fillText(l, x + 7 * k, top + 2 * k + lh * i + lh / 2);
   });
   ctx.restore();
 }
 
-function strokeTwice(ctx: CanvasRenderingContext2D, color: string, width: number) {
+function strokeTwice(ctx: CanvasRenderingContext2D, color: string, width: number, halo = false) {
+  if (halo) {
+    // a11y(visual): a white outer edge, so the outline stands off the stain whatever its colour
+    ctx.lineWidth = width + 6;
+    ctx.strokeStyle = "rgba(255,255,255,0.95)";
+    ctx.stroke();
+  }
   ctx.lineWidth = width + 2.5;
   ctx.strokeStyle = "rgba(0,0,0,0.5)";
   ctx.stroke();
   ctx.lineWidth = width;
   ctx.strokeStyle = color;
   ctx.stroke();
+}
+
+/** a11y(visual): a white ring under a pin's head (or a flag's cloth) and needle, for the colour-blind-safe display */
+function drawPinHalo(ctx: CanvasRenderingContext2D, style: PinStyle | undefined, x: number, y: number, size: number) {
+  const h = pinHead({ x, y }, size, style);
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(h.x, h.y, size * (style === "flag" ? 0.48 : 0.34) + 3, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(255,255,255,0.95)";
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = "#000";
+  ctx.stroke();
+  ctx.restore();
 }
 
 function tracePath(ctx: CanvasRenderingContext2D, s: Pt[], closed: boolean) {
@@ -354,10 +492,10 @@ function tracePath(ctx: CanvasRenderingContext2D, s: Pt[], closed: boolean) {
 }
 
 /** where a shape's label goes (screen) */
-function labelAt(coords: ViewerCoords, a: Annotation, s: Pt[]): Pt {
+function labelAt(coords: ViewerCoords, a: Annotation, s: Pt[], ps = PIN_SIZE): Pt {
   if (a.kind === "pin") {
-    const h = pinHead(s[0]);
-    return { x: h.x + PIN_SIZE * 0.45, y: h.y };
+    const h = pinHead(s[0], ps, a.pinStyle);
+    return { x: h.x + ps * (a.pinStyle === "flag" ? 0.4 : 0.45), y: h.y };
   }
   if (a.kind === "circle") {
     const r = (a.radiusNm ?? 0) * coords.screenPxPerNm();
@@ -380,6 +518,8 @@ export function paintAnnotations(ctx: CanvasRenderingContext2D, coords: ViewerCo
   const showTitles = opts.showTitles ?? true;
   const calibrated = opts.calibrated ?? useStore.getState().slide.info?.calibrated ?? true;
   const pxPerNm = coords.screenPxPerNm();
+  const ax = annotationStyle(); // a11y(visual)
+  const ps = PIN_SIZE * ax.pinScale;
   ctx.save();
   ctx.scale(scale, scale);
   ctx.lineJoin = "round";
@@ -391,7 +531,8 @@ export function paintAnnotations(ctx: CanvasRenderingContext2D, coords: ViewerCo
     const selected = sel.has(a.id);
     const color = a.color || "#00ff00";
     if (a.kind === "pin") {
-      drawPin(ctx, s[0].x, s[0].y, color, PIN_SIZE, selected);
+      if (ax.halo) drawPinHalo(ctx, a.pinStyle, s[0].x, s[0].y, ps);
+      drawPinStyled(ctx, a.pinStyle, s[0].x, s[0].y, color, ps, selected);
     } else if (a.kind === "circle") {
       ctx.beginPath();
       ctx.arc(s[0].x, s[0].y, Math.max(0.5, (a.radiusNm ?? 0) * pxPerNm), 0, Math.PI * 2);
@@ -399,7 +540,7 @@ export function paintAnnotations(ctx: CanvasRenderingContext2D, coords: ViewerCo
         ctx.fillStyle = `${color}22`;
         ctx.fill();
       }
-      strokeTwice(ctx, selected ? SEL : color, 2);
+      strokeTwice(ctx, selected ? SEL : color, 2, ax.halo);
     } else if (s.length === 1) {
       ctx.beginPath();
       ctx.arc(s[0].x, s[0].y, 4, 0, Math.PI * 2);
@@ -412,7 +553,7 @@ export function paintAnnotations(ctx: CanvasRenderingContext2D, coords: ViewerCo
         ctx.fillStyle = `${color}22`;
         ctx.fill();
       }
-      strokeTwice(ctx, selected ? SEL : color, 2);
+      strokeTwice(ctx, selected ? SEL : color, 2, ax.halo);
       if (a.kind === "ruler") {
         // end ticks, perpendicular to the ruler
         const [p, q] = [s[0], s[s.length - 1]];
@@ -423,7 +564,7 @@ export function paintAnnotations(ctx: CanvasRenderingContext2D, coords: ViewerCo
           ctx.moveTo(e.x - nx, e.y - ny);
           ctx.lineTo(e.x + nx, e.y + ny);
         }
-        strokeTwice(ctx, selected ? SEL : color, 2);
+        strokeTwice(ctx, selected ? SEL : color, 2, ax.halo);
       }
     }
     if (selected)
@@ -438,9 +579,11 @@ export function paintAnnotations(ctx: CanvasRenderingContext2D, coords: ViewerCo
       }
     const title = showTitles && opts.editingId !== a.id ? a.title : "";
     const m = measureText(a, calibrated);
-    if (title || m) {
-      const at = labelAt(coords, a, s);
-      labels.push(() => drawLabel(ctx, at.x, at.y, title ? [title, m ?? ""] : [m ?? ""], selected ? SEL : color));
+    const cn = ax.colorNames ? colorName(color) : ""; // a11y(visual): say the colour, not only show it
+    if (title || m || cn) {
+      const at = labelAt(coords, a, s, ps);
+      const rest = [m, cn].filter(Boolean).join(" · ");
+      labels.push(() => drawLabel(ctx, at.x, at.y, title ? [title, rest] : [rest], selected ? SEL : color, ax));
     }
   }
   for (const l of labels) l();

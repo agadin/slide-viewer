@@ -270,11 +270,13 @@ export function stepSlide(delta: number): void {
   void st.openSlide(next.path);
 }
 
-/** Open a slide from the list (expands its folder). */
-export function openEntry(e: ScanEntry) {
+/** Open a slide from the list (expands its folder). `picked`: the student chose it in the list, so
+ *  Preferences ▸ Slide browser ▸ "hide after picking" applies (not for launch restore). */
+export function openEntry(e: ScanEntry, o: { picked?: boolean } = {}) {
   revealDir(e.dir);
   const st = useStore.getState();
   if (st.slide.path !== e.path || st.slide.error) void st.openSlide(e.path);
+  if (o.picked && useSettings.getState().s.browser.hideOnPick) st.setUi({ sidebarOpen: false });
 }
 
 /** Update the scan entry of the open slide after its annotations were saved (badge + count). */

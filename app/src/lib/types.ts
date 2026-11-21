@@ -102,6 +102,10 @@ export type AnnotationKind = "pin" | "ruler" | "freehand" | "circle" | "rectangl
  * - freehand: n points, closed or open
  * - other: an NDP.view annotation we don't edit (arrow, text, …): drawn if possible, always preserved
  */
+/** NDP.view pin icon shapes. Real files confirm "pin" (pingreen) and "flag" (flagred). */
+export type PinStyle = "pin" | "flag";
+export const PIN_STYLES: PinStyle[] = ["pin", "flag"];
+
 export interface Annotation {
   /** app-local id (stable while the slide is open) */
   id: string;
@@ -115,6 +119,8 @@ export interface Annotation {
   points: PtNm[];
   radiusNm?: number;
   closed?: boolean;
+  /** pins only: NDP.view icon shape ("pingreen" vs "flagred"); undefined = "pin" */
+  pinStyle?: PinStyle;
   /** NDP.view's raw `type` / `displayname` attributes (kept for round-tripping) */
   ndpType?: string;
   displayName?: string;

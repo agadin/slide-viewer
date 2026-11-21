@@ -12,6 +12,8 @@ Pins and shapes are saved as `.ndpa` files next to each slide. That's the format
 
 **New here?** Read [Getting started](getting-started.md), then [Viewing a slide](viewing.md). Taking a practical exam? Read [Exam answers](annotating.md#exam-answers) first.
 
+**Using the keyboard only, a screen reader, larger text or high contrast?** See [Accessibility](accessibility.md).
+
 > Most controls show what they do when you hover over them. Press **⇧⌘/** (Ctrl+Shift+/ on Windows) at any time to open this help.
 
 ## Your files stay yours

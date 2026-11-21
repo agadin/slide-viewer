@@ -4,6 +4,7 @@ import { HOME, TOPICS, article, helpImage, hitRef, parseRef, searchHelp } from "
 import { flash, SearchField } from "./controls";
 import { renderMarkdown } from "../lib/markdown";
 import { openExternal } from "../lib/backend";
+import { useDialogFocus } from "../lib/focus";
 
 /**
  * The help wiki viewer, in the style of macOS Help: a home page with topics, search, one article at a time
@@ -141,6 +142,9 @@ export function HelpPanel() {
   const setUi = useStore((s) => s.setUi);
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const drag = useRef<{ dx: number; dy: number } | null>(null);
+  // a11y: focus moves into the panel when it opens and back to where it was when it closes (not modal: no trap)
+  const panel = useRef<HTMLElement>(null);
+  useDialogFocus(panel, { enabled: topic !== null });
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -173,7 +177,7 @@ export function HelpPanel() {
   };
 
   return (
-    <aside className="help-panel" style={pos ? { left: pos.x, top: pos.y, right: "auto" } : undefined} role="dialog" aria-label="Help">
+    <aside ref={panel} className="help-panel" style={pos ? { left: pos.x, top: pos.y, right: "auto" } : undefined} role="dialog" aria-label="Help">
       <HelpBrowser initial={topic || "index"} onClose={() => setUi({ help: null })} dragProps={dragProps} />
     </aside>
   );

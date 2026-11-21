@@ -8,7 +8,7 @@
  * only the edited fields changed, deleted annotations removed and new ones appended as fresh `ndpviewstate`s
  * (NDP.view's formatting: tabs, XML declaration). Unknown elements/attributes and their order survive.
  */
-import type { Annotation, AnnotationKind, PtNm } from "./types";
+import type { Annotation, AnnotationKind, PinStyle, PtNm } from "./types";
 import { uid } from "./util";
 
 export interface RawAnnotation {
@@ -119,7 +119,7 @@ export interface NdpaDocument {
 }
 
 /** what the item looked like when it was read: only fields that differ from this are written */
-type Snapshot = Pick<Annotation, "title" | "details" | "color" | "points" | "radiusNm" | "closed">;
+type Snapshot = Pick<Annotation, "title" | "details" | "color" | "points" | "radiusNm" | "closed" | "pinStyle">;
 /** `Annotation.source` for an item read from the file */
 interface OrigSource {
   kind: "orig";
@@ -291,7 +291,9 @@ export function nearestPinColor(hex: string): { name: string; hex: string } {
   return best;
 }
 /** "pingreen" for a colour */
-export const pinIcon = (hex: string) => `pin${nearestPinColor(hex).name}`;
+export const pinIcon = (hex: string, style: PinStyle = "pin") => `${style}${nearestPinColor(hex).name}`;
+/** "flagred" → "flag"; anything else NDP.view writes for a pin → "pin" */
+export const pinStyleOf = (icon: string): PinStyle => (/^\s*(icon)?flag/i.test(icon) ? "flag" : "pin");
 
 // ---------------------------------------------------------------- reading
 
@@ -326,10 +328,12 @@ function readAnnotation(vs: Element, ann: Element): Omit<Annotation, "id" | "ndp
   let points: PtNm[] | null = null;
   let radiusNm: number | undefined;
   let closed: boolean | undefined;
+  let pinStyle: PinStyle | undefined;
   if (t === "pin") {
     if (fin(x, y)) {
       kind = "pin";
       points = [{ x, y }];
+      if (pinStyleOf(text(child(ann, "icon")) || text(child(ann, "stricon"))) === "flag") pinStyle = "flag";
     }
   } else if (t === "circle") {
     const r = numOf(child(ann, "radius"));
@@ -362,13 +366,14 @@ function readAnnotation(vs: Element, ann: Element): Omit<Annotation, "id" | "ndp
   } else if (pts?.length) points = pts;
   else if (fin(x, y)) points = [{ x, y }];
   if (!points || !points.length) return null;
-  return { ...base, kind, points, radiusNm, closed };
+  return { ...base, kind, points, radiusNm, closed, ...(pinStyle ? { pinStyle } : {}) };
 }
 
 const snapshot = (a: Snapshot): Snapshot => ({
   title: a.title,
   details: a.details,
   color: a.color,
+  pinStyle: a.pinStyle,
   points: a.points.map((p) => ({ ...p })),
   radiusNm: a.radiusNm,
   closed: a.closed,
@@ -462,6 +467,13 @@ function applyEdits(vs: Element, ann: Element, a: Annotation, o: Snapshot) {
       recolorIcon(child(ann, "stricon"), a.color);
     }
   }
+  if (a.kind === "pin" && (a.pinStyle ?? "pin") !== (o.pinStyle ?? "pin")) {
+    // a new style rewrites both icon names in full, e.g. pingreen → flaggreen / iconflaggreen
+    const icon = pinIcon(a.color, a.pinStyle ?? "pin");
+    const iconEl = child(ann, "icon"), strEl = child(ann, "stricon");
+    if (iconEl) iconEl.textContent = icon;
+    if (strEl) strEl.textContent = `icon${icon}`;
+  }
   const geom = !samePoints(a.points, o.points) || !sameNum(a.radiusNm, o.radiusNm) || a.closed !== o.closed;
   if (!geom) return;
   switch (a.kind) {
@@ -506,7 +518,7 @@ function annotationSpec(a: Annotation): Spec {
   const p0 = a.points[0];
   switch (a.kind) {
     case "pin": {
-      const icon = pinIcon(color);
+      const icon = pinIcon(color, a.pinStyle ?? "pin");
       return ["annotation", { type: "pin", displayname: "AnnotatePin", color }, [["x", {}, fmtNm(p0.x)], ["y", {}, fmtNm(p0.y)], ["icon", {}, icon], ["stricon", {}, `icon${icon}`]]];
     }
     case "circle":

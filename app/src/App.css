@@ -9,8 +9,9 @@
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
   /* liquid glass: thin tint + heavy blur/saturation, a lit rim and an inner sheen */
-  --glass: rgba(16, 16, 20, 0.5);
-  --glass-strong: rgba(16, 16, 20, 0.68);
+  /* a11y(visual): alphas raised from 0.5 / 0.68 so text keeps 4.5:1 over a white slide (tests/a11y-visual.test.ts) */
+  --glass: rgba(16, 16, 20, 0.76);
+  --glass-strong: rgba(16, 16, 20, 0.84);
   --glass-blur: blur(26px) saturate(160%) brightness(0.92);
   --glass-edge: rgba(255, 255, 255, 0.16);
   --glass-sheen: linear-gradient(
@@ -36,19 +37,28 @@
 
   /* text */
   --tx-1: rgba(255, 255, 255, 0.94);
-  --tx-2: rgba(240, 240, 248, 0.8);
-  --tx-3: rgba(240, 240, 248, 0.62);
-  --tx-4: rgba(240, 240, 248, 0.38);
+  /* a11y(visual): tx-3 0.62 → 0.7 and tx-4 0.38 → 0.5 (tx-4 was 3.3:1; now ≥ 4.5:1 on the panels) */
+  --tx-2: rgba(240, 240, 248, 0.82);
+  --tx-3: rgba(240, 240, 248, 0.7);
+  --tx-4: rgba(240, 240, 248, 0.5);
 
   /* accent + status */
-  --accent: #e8b25a;
-  --accent-soft: rgba(232, 178, 90, 0.22);
+  --accent: #8cc8ff;
+  --accent-soft: rgba(140, 200, 255, 0.22);
   --ok: #8fd17a;
   --ok-bg: rgba(143, 209, 122, 0.16);
   --bad: #ff7b6e;
   --bad-bg: rgba(255, 123, 110, 0.16);
   --auto: #c6a8ff;
-  --sel: #f4c04e;
+  --sel: #8cc8ff;
+
+  /* a11y(visual): focus ring = accent ring over a dark halo, so it reads on glass and on a white slide */
+  --focus: #8cc8ff;
+  --focus-halo: #06182a;
+  /* text scale (Preferences ▸ Accessibility ▸ Text size), set by lib/a11y.ts */
+  --ts: 1;
+  /* layout widths grow more slowly than the text */
+  --ts-w: calc(1 + (var(--ts) - 1) * 0.6);
 
   color-scheme: dark;
 }
@@ -66,7 +76,7 @@ body,
 body {
   background: #121214;
   color: var(--tx-1);
-  font: 400 13px/1.38 var(--sans);
+  font: 400 calc(13px * var(--ts, 1))/1.38 var(--sans);
   -webkit-font-smoothing: antialiased;
   font-feature-settings: "tnum" 1;
   user-select: none;
@@ -97,11 +107,11 @@ svg {
   color: var(--tx-3);
 }
 .small {
-  font-size: 12px;
+  font-size: calc(12px * var(--ts, 1));
 }
 .help {
   color: var(--tx-3);
-  font-size: 12px;
+  font-size: calc(12px * var(--ts, 1));
   line-height: 1.45;
 }
 .warn {
@@ -137,7 +147,7 @@ svg {
   min-width: 18px;
   height: 18px;
   padding: 0 4px;
-  font: 500 11px/1 var(--sans);
+  font: 500 calc(12px * var(--ts, 1))/1 var(--sans);
   color: var(--tx-2);
   background: var(--fill-1);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -177,10 +187,6 @@ button:disabled {
   color: var(--tx-4);
   box-shadow: none;
   background: var(--fill-1);
-}
-button:focus-visible {
-  outline: 2px solid var(--accent-soft);
-  outline-offset: 1px;
 }
 .btn.ghost {
   background: transparent;
@@ -241,7 +247,7 @@ textarea {
 input:focus,
 select:focus,
 textarea:focus {
-  border-color: rgba(232, 178, 90, 0.7);
+  border-color: rgba(140, 200, 255, 0.7);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 select {
@@ -272,8 +278,8 @@ input[type="checkbox"]:checked::after {
   content: "";
   width: 7px;
   height: 3.5px;
-  border-left: 2px solid #1a1306;
-  border-bottom: 2px solid #1a1306;
+  border-left: 2px solid #06182a;
+  border-bottom: 2px solid #06182a;
   transform: translateY(-1px) rotate(-45deg);
 }
 input[type="range"] {
@@ -331,7 +337,7 @@ input[type="color"]::-webkit-color-swatch {
   height: 24px;
   border: 0;
   background: transparent;
-  font: 400 12.5px/1 var(--mono);
+  font: 400 calc(12.5px * var(--ts, 1))/1 var(--mono);
   padding: 0 4px 0 8px;
   box-shadow: none;
 }
@@ -344,10 +350,10 @@ input[type="color"]::-webkit-color-swatch {
 .num u {
   text-decoration: none;
   color: var(--tx-3);
-  font-size: 11.5px;
+  font-size: calc(12px * var(--ts, 1));
 }
 .num:focus-within {
-  border-color: rgba(232, 178, 90, 0.7);
+  border-color: rgba(140, 200, 255, 0.7);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .check {
@@ -386,7 +392,7 @@ input[type="color"]::-webkit-color-swatch {
 }
 .seg button.on.acc {
   background: var(--accent);
-  color: #1a1306;
+  color: #06182a;
 }
 .seg.wide button {
   padding: 0 12px;
@@ -446,7 +452,7 @@ input[type="color"]::-webkit-color-swatch {
   align-items: center;
   gap: 5px;
   color: var(--tx-3);
-  font-size: 12px;
+  font-size: calc(12px * var(--ts, 1));
   padding: 0 6px;
 }
 .saved.err {
@@ -517,7 +523,7 @@ input[type="color"]::-webkit-color-swatch {
 }
 .vtool .meta {
   color: var(--tx-3);
-  font-size: 12px;
+  font-size: calc(12px * var(--ts, 1));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -553,7 +559,7 @@ input[type="color"]::-webkit-color-swatch {
   background: var(--glass-sheen), var(--glass-strong);
 }
 .keysheet h4 {
-  font: 600 11px/1 var(--sans);
+  font: 600 calc(12px * var(--ts, 1))/1 var(--sans);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--tx-3);
@@ -575,7 +581,7 @@ input[type="color"]::-webkit-color-swatch {
   gap: 8px;
   height: 24px;
   color: var(--tx-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--ts, 1));
   border-bottom: 1px solid var(--sep);
   white-space: nowrap;
 }
@@ -589,7 +595,7 @@ input[type="color"]::-webkit-color-swatch {
   align-items: center;
   justify-content: space-between;
   color: var(--tx-3);
-  font-size: 12px;
+  font-size: calc(12px * var(--ts, 1));
 }
 
 /* ---------- panel header ---------- */
@@ -606,7 +612,7 @@ input[type="color"]::-webkit-color-swatch {
   border-radius: 0;
   box-shadow: none;
   font-weight: 600;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--ts, 1));
   color: var(--tx-1);
   flex: none;
 }
@@ -639,7 +645,7 @@ button.phead:hover:not(:disabled) {
   padding: 6px;
   border-radius: 16px;
   background: var(--glass-sheen), var(--glass-strong);
-  font-size: 13px;
+  font-size: calc(13px * var(--ts, 1));
   outline: none;
 }
 .ctx-menu.shake {
@@ -660,7 +666,7 @@ button.phead:hover:not(:disabled) {
   gap: 12px;
   padding: 4px 9px 7px;
   color: var(--tx-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--ts, 1));
   border-bottom: 1px solid var(--sep);
   margin-bottom: 4px;
   white-space: nowrap;
@@ -702,17 +708,17 @@ button.phead:hover:not(:disabled) {
 .ctx-item:hover:not(:disabled),
 .ctx-item:focus-visible {
   background: var(--accent);
-  color: #1a1306;
+  color: #06182a;
   outline: none;
 }
 .ctx-item:hover .ic,
 .ctx-item:hover span:nth-child(2) {
-  color: #1a1306 !important;
+  color: #06182a !important;
 }
 .ctx-item:hover .kbd {
   background: rgba(0, 0, 0, 0.12);
   border-color: rgba(0, 0, 0, 0.15);
-  color: #1a1306;
+  color: #06182a;
 }
 .ctx-item .ic {
   display: flex;
@@ -740,14 +746,14 @@ button.phead:hover:not(:disabled) {
   width: calc(100% - 12px);
   margin: 4px 6px 6px;
   height: 30px;
-  font-size: 13px;
-  border-color: rgba(232, 178, 90, 0.7);
+  font-size: calc(13px * var(--ts, 1));
+  border-color: rgba(140, 200, 255, 0.7);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .ctx-sublbl {
   padding: 5px 9px 3px;
   color: var(--tx-3);
-  font-size: 11px;
+  font-size: calc(12px * var(--ts, 1));
   font-weight: 600;
 }
 .ctx-suggest {
@@ -774,7 +780,7 @@ button.phead:hover:not(:disabled) {
   border-top: 1px solid var(--sep);
   margin-top: 4px;
   color: var(--tx-3);
-  font-size: 11.5px;
+  font-size: calc(12px * var(--ts, 1));
 }
 .ctx-hint span {
   display: inline-flex;
@@ -806,7 +812,7 @@ button.phead:hover:not(:disabled) {
   width: 760px;
 }
 .modal h2 {
-  font: 650 16px/1.2 var(--sans);
+  font: 650 calc(16px * var(--ts, 1))/1.2 var(--sans);
   margin-bottom: 14px;
 }
 .modal-actions {
@@ -837,7 +843,7 @@ button.phead:hover:not(:disabled) {
   background: var(--well);
 }
 .stats b {
-  font: 650 16px var(--sans);
+  font: 650 calc(16px * var(--ts, 1)) var(--sans);
 }
 .preview {
   margin-top: 12px;
@@ -851,7 +857,7 @@ button.phead:hover:not(:disabled) {
 .preview pre {
   margin: 0;
   padding: 8px 12px 12px;
-  font: 400 12px/1.55 var(--mono);
+  font: 400 calc(12px * var(--ts, 1))/1.55 var(--mono);
   max-height: 220px;
   overflow: auto;
   white-space: pre-wrap;
@@ -909,7 +915,7 @@ button.phead:hover:not(:disabled) {
 }
 .prefs-nav button.on {
   background: var(--accent);
-  color: #1a1306;
+  color: #06182a;
   font-weight: 600;
 }
 .prefs-content {
@@ -918,7 +924,7 @@ button.phead:hover:not(:disabled) {
   overflow: auto;
 }
 .prefs-content h2 {
-  font: 700 18px/1.2 var(--sans);
+  font: 700 calc(18px * var(--ts, 1))/1.2 var(--sans);
   margin-bottom: 3px;
 }
 .prefs-content .lede {
@@ -932,7 +938,7 @@ button.phead:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.05);
 }
 .gt {
-  font: 600 11px/1 var(--sans);
+  font: 600 calc(12px * var(--ts, 1))/1 var(--sans);
   color: var(--tx-3);
   padding: 8px 0 10px;
 }
@@ -996,7 +1002,7 @@ button.phead:hover:not(:disabled) {
   background: var(--fill-1);
 }
 .sw .hex {
-  font: 400 11.5px var(--mono);
+  font: 400 calc(12px * var(--ts, 1)) var(--mono);
   color: var(--tx-3);
 }
 .preview-strip {
@@ -1015,7 +1021,7 @@ button.phead:hover:not(:disabled) {
   position: absolute;
   left: 8px;
   top: 6px;
-  font: 600 10.5px/1 var(--sans);
+  font: 600 calc(12px * var(--ts, 1))/1 var(--sans);
   color: #fff;
   background: rgba(20, 20, 20, 0.55);
   padding: 4px 7px;
@@ -1033,7 +1039,7 @@ button.phead:hover:not(:disabled) {
   height: 28px;
   background: var(--well);
   box-shadow: none;
-  font: 600 12.5px var(--sans);
+  font: 600 calc(12.5px * var(--ts, 1)) var(--sans);
 }
 .cap.listening {
   border: 1px dashed var(--accent);
@@ -1055,7 +1061,7 @@ button.phead:hover:not(:disabled) {
 }
 .prefs-foot .note {
   color: var(--tx-3);
-  font-size: 12px;
+  font-size: calc(12px * var(--ts, 1));
 }
 .prefs-foot .btn.light {
   min-width: 84px;
@@ -1212,7 +1218,7 @@ body.drag-sorting * {
   background: none;
   border: 0;
   box-shadow: none;
-  font-size: 17px;
+  font-size: calc(17px * var(--ts, 1));
   color: var(--tx-2);
 }
 .hp-ic:disabled {
@@ -1227,22 +1233,22 @@ body.drag-sorting * {
   display: flex;
   flex-direction: column;
   gap: 9px;
-  font-size: 13px;
+  font-size: calc(13px * var(--ts, 1));
   line-height: 1.5;
   color: var(--tx-2);
 }
 .hp-article h2 {
-  font: 700 19px/1.25 var(--sans);
+  font: 700 calc(19px * var(--ts, 1))/1.25 var(--sans);
   color: var(--tx-1);
   margin-bottom: 2px;
 }
 .hp-article h3 {
-  font: 650 14px var(--sans);
+  font: 650 calc(14px * var(--ts, 1)) var(--sans);
   color: var(--tx-1);
   margin-top: 12px;
 }
 .hp-article h4 {
-  font: 650 13px var(--sans);
+  font: 650 calc(13px * var(--ts, 1)) var(--sans);
   color: var(--tx-1);
   margin-top: 6px;
 }
@@ -1252,7 +1258,7 @@ body.drag-sorting * {
 }
 .hp-article code,
 .hp-article kbd {
-  font: 12px var(--mono);
+  font: calc(12px * var(--ts, 1)) var(--mono);
   padding: 1px 5px;
   border-radius: 4px;
   background: var(--fill-1);
@@ -1277,15 +1283,15 @@ body.drag-sorting * {
   border-radius: 50%;
   display: grid;
   place-items: center;
-  font: 700 11px var(--sans);
-  color: #1a1306;
+  font: 700 calc(12px * var(--ts, 1)) var(--sans);
+  color: #06182a;
   background: var(--accent);
 }
 .hp-note {
   padding: 8px 10px;
   border-left: 3px solid var(--accent);
   background: var(--accent-soft);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--ts, 1));
 }
 
 /* ---------- help browser ---------- */
@@ -1313,10 +1319,10 @@ body.drag-sorting * {
   box-shadow: none;
   outline: none;
   color: var(--tx-1);
-  font: 12.5px var(--sans);
+  font: calc(12.5px * var(--ts, 1)) var(--sans);
 }
 .hp-ic.hp-home {
-  font-size: 14px;
+  font-size: calc(14px * var(--ts, 1));
 }
 .hp-article p,
 .hp-article li {
@@ -1360,13 +1366,13 @@ body.drag-sorting * {
   background: #111;
 }
 .hp-fig figcaption {
-  font-size: 11.5px;
+  font-size: calc(12px * var(--ts, 1));
   color: var(--tx-3);
 }
 .hp-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: calc(12px * var(--ts, 1));
 }
 .hp-table th {
   text-align: left;
@@ -1383,7 +1389,7 @@ body.drag-sorting * {
   margin: 0;
   padding: 8px 10px;
   background: var(--well);
-  font: 11.5px/1.45 var(--mono);
+  font: calc(12px * var(--ts, 1))/1.45 var(--mono);
   white-space: pre-wrap;
 }
 /* topic list and search results: one grouped panel, rows split by inset hairlines (macOS Settings style) */
@@ -1437,7 +1443,7 @@ body.drag-sorting * {
 }
 .hp-chev {
   flex: none;
-  font-size: 17px;
+  font-size: calc(17px * var(--ts, 1));
   line-height: 1;
   color: var(--tx-4);
 }
@@ -1487,7 +1493,7 @@ body.drag-sorting * {
   box-shadow: none;
   outline: none;
   color: var(--tx-1);
-  font: 12.5px var(--sans);
+  font: calc(12.5px * var(--ts, 1)) var(--sans);
 }
 .prefs-results {
   display: flex;
@@ -1497,7 +1503,7 @@ body.drag-sorting * {
 }
 .prefs-results .pr-h {
   padding: 8px 10px 3px;
-  font: 600 11px var(--sans);
+  font: 600 calc(12px * var(--ts, 1)) var(--sans);
   color: var(--tx-3);
 }
 .prefs-nav .prefs-results button {
@@ -1514,13 +1520,13 @@ body.drag-sorting * {
   background: var(--fill-1);
 }
 .pr-where {
-  font-size: 11px;
+  font-size: calc(12px * var(--ts, 1));
   color: var(--tx-3);
 }
 .pr-none {
   padding: 8px 10px;
   color: var(--tx-3);
-  font-size: 12px;
+  font-size: calc(12px * var(--ts, 1));
 }
 .prefs-h {
   display: flex;
@@ -1532,7 +1538,7 @@ body.drag-sorting * {
   height: 22px;
   padding: 0;
   border-radius: 50%;
-  font: 700 12px var(--sans);
+  font: 700 calc(12px * var(--ts, 1)) var(--sans);
   color: var(--tx-2);
 }
 .pref-flash {
@@ -1549,10 +1555,10 @@ body.drag-sorting * {
   gap: 16px;
 }
 .about-name {
-  font: 700 17px var(--sans);
+  font: 700 calc(17px * var(--ts, 1)) var(--sans);
 }
 .about-ver {
-  font: 500 12.5px var(--mono);
+  font: 500 calc(12.5px * var(--ts, 1)) var(--mono);
   color: var(--tx-2);
   margin: 2px 0 4px;
 }
@@ -1574,7 +1580,7 @@ body.drag-sorting * {
   line-height: 1.5;
 }
 .help-q {
-  font: 600 14px var(--sans);
+  font: 600 calc(14px * var(--ts, 1)) var(--sans);
 }
 
 /* ---------- ruler (bottom toolbar) ---------- */
@@ -1603,7 +1609,7 @@ body.drag-sorting * {
   border-radius: 999px;
   background: rgba(255, 224, 102, 0.22);
   color: #ffe066;
-  font: 600 11px var(--mono);
+  font: 600 calc(12px * var(--ts, 1)) var(--mono);
   text-align: center;
 }
 .ruler-clear {
@@ -1613,7 +1619,7 @@ body.drag-sorting * {
   border: 0;
   box-shadow: none;
   color: var(--tx-2);
-  font-size: 12px;
+  font-size: calc(12px * var(--ts, 1));
 }
 .ruler-clear:hover:not(:disabled) {
   background: none;
@@ -1626,10 +1632,11 @@ body.drag-sorting * {
    (foundation; features style themselves in their own CSS files) */
 .app-shell {
   --gap: 10px;
-  --top: 48px;
-  --side-w: 280px;
-  --panel-w: 320px;
-  --tool-h: 40px;
+  /* a11y(visual): bars and columns grow with Preferences ▸ Accessibility ▸ Text size */
+  --top: calc(48px * var(--ts, 1));
+  --side-w: calc(280px * var(--ts-w, 1));
+  --panel-w: calc(320px * var(--ts-w, 1));
+  --tool-h: calc(40px * var(--ts, 1));
   --ledger-h: 0px;
   position: relative;
   height: 100vh;
@@ -1677,7 +1684,7 @@ body.drag-sorting * {
   text-overflow: ellipsis;
 }
 .sv-badge {
-  font-size: 11px;
+  font-size: calc(12px * var(--ts, 1));
   padding: 1px 7px;
   border-radius: 999px;
   background: var(--fill-1);
@@ -1771,3 +1778,364 @@ body.drag-sorting * {
 /* ============================ end slide viewer shell ============================ */
 
 /* ---------- feature additions: append below, one delimited block per builder ---------- */
+
+/* ---------- right-click submenus (ContextMenu.tsx) ---------- */
+.ctx-menu.ctx-sub {
+  z-index: 22;
+  min-width: 180px;
+}
+.ctx-item.hi:not(:disabled) {
+  background: var(--accent);
+  color: #06182a;
+}
+.ctx-item.hi .ic,
+.ctx-item.hi span:nth-child(2) {
+  color: #06182a !important;
+}
+.ctx-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 0 0 2px rgba(255, 255, 255, 0.25);
+}
+.ctx-chev {
+  font-size: calc(15px * var(--ts, 1));
+  line-height: 1;
+  color: var(--tx-3);
+  padding-right: 2px;
+}
+.ctx-item:hover .ctx-chev,
+.ctx-item.hi .ctx-chev {
+  color: #06182a;
+}
+
+/* disabled menu items are plain dimmed text, not grey buttons */
+.ctx-item:disabled {
+  background: transparent;
+  box-shadow: none;
+}
+
+/* ==== a11y(visual): focus, text size, high contrast, reduced motion, forced colours ====
+   Settings live in Preferences ▸ Accessibility (lib/settings.ts `a11y`); lib/a11y.ts applies them to <html>
+   as --ts (text scale) and the classes a11y-ts, a11y-hc, a11y-rm, a11y-cb. Contrast of the tokens is
+   checked by tests/a11y-visual.test.ts. */
+
+/* ---- focus visible (WCAG 2.4.7, 1.4.11): an accent ring over a dark halo, readable on glass and on a
+   white slide. Outside the control by default; inset where a scroll box or a neighbour would hide it. */
+html :is(button, a[href], input, select, textarea, summary, [tabindex]:not([tabindex="-1"]), [role="tab"], [role="treeitem"], [role="option"], [role="menuitem"], [role="slider"], [role="button"]):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--focus-halo), 0 0 0 6px var(--focus-halo);
+}
+html :is(.ctx-item, .prefs-nav button, .hp-group > button, .phead, .seg button, .tbtn, .br-row, .br-root, [role="treeitem"], [role="option"], [role="row"], [role="listitem"], [role="tab"]):focus-visible,
+html :is(.br-list, .sv-panel-body, .hp-body, .prefs-content, .prefs-results, [role="tree"], [role="listbox"], [role="grid"]):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -4px;
+  box-shadow: inset 0 0 0 4px var(--focus-halo);
+}
+/* the slide itself (OpenSeadragon's canvas, or the host if it takes focus) */
+html :is(.openseadragon-canvas, .viewer-host, .viewer-wrap, .viewer-pane):focus-visible {
+  outline: 3px solid var(--focus) !important;
+  outline-offset: -5px !important;
+  box-shadow: inset 0 0 0 6px var(--focus-halo);
+}
+/* the tree keeps focus on the list and moves a "current" row: ring that row */
+html .br-list:focus-visible .br-row.cur,
+html .br-list.kbd-nav:focus .br-row.cur {
+  outline: 2px solid var(--focus);
+  outline-offset: -4px;
+  box-shadow: inset 0 0 0 4px var(--focus-halo);
+}
+/* search fields and number boxes ring their wrapper, not the bare input inside */
+html :is(.prefs-search, .lsearch, .sv-search, .hp-search, .num):focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--focus-halo), 0 0 0 6px var(--focus-halo);
+}
+html :is(.prefs-search, .lsearch, .sv-search, .hp-search, .num) input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+/* the open menu box itself is not a control; its highlighted row shows where focus is */
+html .ctx-menu:focus-visible {
+  outline: none;
+  box-shadow: var(--glass-rim), var(--glass-shadow);
+}
+/* sliders: ring the thumb's track area */
+html input[type="range"]:focus-visible {
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+/* UI boundaries (1.4.11): form fields and checkboxes get borders of at least 3:1 */
+input[type="text"],
+input:not([type]),
+input[type="number"],
+input[type="search"],
+select,
+textarea,
+.num {
+  border-color: rgba(255, 255, 255, 0.42);
+}
+input[type="checkbox"] {
+  border-color: rgba(255, 255, 255, 0.55);
+}
+input[type="checkbox"].switch {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+}
+input[type="checkbox"].switch:checked {
+  box-shadow: none;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  background: linear-gradient(to right, var(--accent) var(--fill, 50%), rgba(255, 255, 255, 0.4) var(--fill, 50%));
+}
+
+/* ---- text size (1.4.4, 1.4.10, 1.4.12): every font size is calc(Npx * var(--ts)). When the text is
+   larger, fixed-height controls grow with their text instead of clipping it. */
+.app-shell {
+  --side-w: min(calc(280px * var(--ts-w, 1)), 32vw);
+  --panel-w: min(calc(320px * var(--ts-w, 1)), 34vw);
+}
+.app-shell.no-side {
+  --side-w: 0px;
+}
+.app-shell.no-panel {
+  --panel-w: 0px;
+}
+.prefs-nav {
+  width: calc(190px * var(--ts-w, 1));
+}
+.prow2 {
+  grid-template-columns: calc(140px * var(--ts-w, 1)) minmax(0, 1fr);
+}
+.ctx-menu {
+  min-width: calc(250px * var(--ts-w, 1));
+  max-width: min(calc(340px * var(--ts-w, 1)), calc(100vw - 16px));
+}
+.ctx-menu.ctx-sub {
+  min-width: calc(180px * var(--ts-w, 1));
+}
+.modal {
+  max-width: calc(100vw - 32px);
+}
+.modal:not(.prefs-modal) {
+  width: min(calc(580px * var(--ts-w, 1)), calc(100vw - 32px));
+}
+.modal.wide {
+  width: min(calc(760px * var(--ts-w, 1)), calc(100vw - 32px));
+}
+.prefs-modal {
+  width: min(calc(920px * var(--ts-w, 1)), calc(100vw - 32px));
+  height: min(calc(680px * var(--ts-w, 1)), calc(100vh - 32px));
+}
+.help-panel {
+  width: min(calc(340px * var(--ts-w, 1)), calc(100vw - 32px));
+}
+.session {
+  max-width: calc(260px * var(--ts-w, 1));
+}
+:root.a11y-ts :is(button, .btn, .tbtn, .ctx-item, .phead, .cap, .selector, .num, .prefs-search, .lsearch, .sv-search, .hp-search, .ctx-suggest li, .sw, .br-root, .br-dir, .ks-row, .keyrow, .win-title, .hp-bar, .ctx-title .back, .ruler-clear),
+:root.a11y-ts :is(input:not([type="checkbox"]):not([type="range"]):not([type="color"]), select) {
+  height: auto;
+  min-height: 2em;
+}
+:root.a11y-ts :is(.num input, .prefs-search input, .lsearch input, .sv-search input, .hp-search input) {
+  min-height: 0;
+}
+:root.a11y-ts :is(.kbd, .br-badge, .sv-badge, .ruler-n) {
+  height: auto;
+  min-height: 1.5em;
+  min-width: 1.5em;
+}
+:root.a11y-ts .topbar {
+  height: auto;
+  min-height: calc(40px * var(--ts, 1));
+}
+:root.a11y-ts .prefs-foot {
+  height: auto;
+  min-height: calc(54px * var(--ts, 1));
+}
+:root.a11y-ts :is(.btn.icon, .hp-ic, .prefs-help) {
+  width: auto;
+  min-width: 2em;
+}
+/* long labels wrap inside the side panels and Preferences rather than running out of them */
+:root.a11y-ts :is(.prefs-nav button, .hp-group > button, .phead, .ctx-item span:nth-child(2)) {
+  white-space: normal;
+  text-align: left;
+}
+:root.a11y-ts :is(.sv-panel, .sv-side, .prefs-content) :is(.check, .help, label) {
+  overflow-wrap: anywhere;
+}
+/* a11y(audit): at large text sizes the floating tool and zoom bars wrap instead of running off the slide,
+   and the About buttons get wider columns and wrap their labels (WCAG 1.4.4 at 200 %) */
+:root.a11y-ts :is(.vtool.sv-toolbar, .sv-zoom) {
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: calc(100% - 24px);
+  height: auto;
+  min-height: var(--tool-h, 40px);
+  padding: 3px 6px;
+  border-radius: 18px;
+}
+:root.a11y-ts .about-actions {
+  grid-template-columns: repeat(auto-fit, minmax(calc(130px * var(--ts, 1)), 1fr));
+}
+:root.a11y-ts .about-actions .btn {
+  white-space: normal;
+}
+/* the shortcut sheet: fewer columns when the text is big */
+:root.a11y-ts .keysheet .cols {
+  grid-template-columns: repeat(auto-fill, minmax(calc(150px * var(--ts, 1)), 1fr));
+}
+
+/* ---- high contrast (Preferences ▸ Accessibility, or the OS "Increase contrast"): opaque panels and
+   stronger borders. The same tokens apply under prefers-contrast: more even before lib/a11y.ts runs. */
+:root.a11y-hc {
+  --glass: #0b0b0d;
+  --glass-strong: #0b0b0d;
+  --glass-blur: none;
+  --glass-sheen: linear-gradient(transparent, transparent);
+  --glass-edge: rgba(255, 255, 255, 0.75);
+  --glass-rim: 0 0 0 0 transparent;
+  --fill-1: rgba(255, 255, 255, 0.14);
+  --fill-2: rgba(255, 255, 255, 0.24);
+  --fill-3: rgba(255, 255, 255, 0.34);
+  --well: #000;
+  --sep: rgba(255, 255, 255, 0.45);
+  --tx-1: #fff;
+  --tx-2: #f4f4f8;
+  --tx-3: #dcdce4;
+  --tx-4: #b4b4c0;
+  --accent: #a6d4ff;
+  --accent-soft: rgba(166, 212, 255, 0.32);
+  --focus: #ffd60a;
+  --focus-halo: #000;
+}
+@media (prefers-contrast: more) {
+  :root:not(.a11y-hc-off) {
+    --glass: #0b0b0d;
+    --glass-strong: #0b0b0d;
+    --glass-blur: none;
+    --glass-sheen: linear-gradient(transparent, transparent);
+    --glass-edge: rgba(255, 255, 255, 0.75);
+    --sep: rgba(255, 255, 255, 0.45);
+    --tx-2: #f4f4f8;
+    --tx-3: #dcdce4;
+    --tx-4: #b4b4c0;
+  }
+}
+:root.a11y-hc :is(.topbar, .vtool, .keysheet, .ctx-menu, .modal, .sv-glass, .sv-toast, .update-toast, .help-panel) {
+  text-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  border: 1px solid var(--glass-edge);
+}
+:root.a11y-hc :is(button, .btn):not(.ctx-item):not(.tbtn):not(.phead):not(.hp-ic) {
+  border-color: rgba(255, 255, 255, 0.6);
+}
+:root.a11y-hc :is(.sv-side, .sv-panel, .sv-top, .sv-main) {
+  border-color: rgba(255, 255, 255, 0.5);
+}
+:root.a11y-hc :is(.sv-side, .sv-panel) {
+  background: #000;
+}
+:root.a11y-hc :is(input[type="text"], input:not([type]), input[type="number"], input[type="search"], select, textarea, .num, input[type="checkbox"]) {
+  border-color: rgba(255, 255, 255, 0.8);
+}
+:root.a11y-hc :is(.tbtn.on, .seg button.on, .br-row.on, [aria-selected="true"], [aria-pressed="true"]) {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+:root.a11y-hc .group {
+  background: transparent;
+  border: 1px solid var(--sep);
+}
+
+/* ---- reduce motion (2.3.3): set from Preferences ▸ Accessibility, following the OS by default */
+:root.a11y-rm *,
+:root.a11y-rm *::before,
+:root.a11y-rm *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  transition-delay: 0s !important;
+  scroll-behavior: auto !important;
+}
+
+/* ---- Windows High Contrast / forced colours: system colours, visible borders, Highlight for state */
+@media (forced-colors: active) {
+  html :is(button, a[href], input, select, textarea, [tabindex], [role="tab"], [role="treeitem"], [role="option"], [role="menuitem"]):focus-visible,
+  html .br-list:focus-visible .br-row.cur,
+  html .br-list.kbd-nav:focus .br-row.cur,
+  html :is(.prefs-search, .lsearch, .sv-search, .hp-search, .num):focus-within {
+    outline: 2px solid Highlight;
+    box-shadow: none;
+  }
+  :is(.topbar, .vtool, .keysheet, .ctx-menu, .modal, .sv-glass, .sv-toast, .update-toast, .help-panel, .sv-side, .sv-panel, .group) {
+    border: 1px solid CanvasText;
+    backdrop-filter: none;
+  }
+  button,
+  .btn,
+  .tbtn,
+  .seg button {
+    border: 1px solid ButtonText;
+  }
+  .ctx-item {
+    border: 0;
+  }
+  :is(.ctx-item.hi, .ctx-item:hover, .tbtn.on, .seg button.on, .prefs-nav button.on, .br-row.on, [aria-selected="true"], [aria-pressed="true"]) {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+  }
+  :is(.ctx-item.hi, .ctx-item:hover) :is(.ic, span, .kbd) {
+    color: HighlightText !important;
+  }
+  input[type="checkbox"] {
+    border: 1px solid CanvasText;
+  }
+  input[type="checkbox"]:checked {
+    forced-color-adjust: none;
+    background: Highlight;
+    border-color: Highlight;
+  }
+  input[type="checkbox"]:checked::after {
+    border-color: HighlightText;
+  }
+  input[type="checkbox"].switch::after {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+  button:disabled {
+    color: GrayText;
+    border-color: GrayText;
+  }
+  /* colour swatches and the slide must keep their real colours */
+  :is(.ctx-swatch, input[type="color"], .br-thumb img, .openseadragon-canvas, canvas) {
+    forced-color-adjust: none;
+  }
+}
+/* ==== end a11y(visual) ==== */
+
+/* ---------- side panels float OVER the slide ----------
+   The slide area always spans the whole window under the top bar; the Slides and Image panels cover
+   its edges instead of narrowing it. Opening or closing a panel therefore never resizes the viewer,
+   so the slide can't rescale or squash. Fit and the overlay cards use the uncovered area
+   (viewerHandle.ts visibleArea, the --side-w / --panel-w offsets below). */
+.sv-main {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  z-index: 0;
+}
+.sv-side,
+.sv-panel {
+  position: relative;
+  z-index: 3;
+  grid-row: 2;
+}
+.sv-side {
+  box-shadow: 6px 0 18px rgba(0, 0, 0, 0.35);
+}
+.sv-panel {
+  box-shadow: -6px 0 18px rgba(0, 0, 0, 0.35);
+}

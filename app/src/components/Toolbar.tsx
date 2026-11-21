@@ -3,6 +3,9 @@
  * Tools (Pan V, Pin P, Ruler R, Freehand F, Circle C, Rectangle B) · undo / redo · rotation
  * (90° buttons, Shift-click for the free step, click the angle for a free-rotation slider) · zoom
  * in / out / fit · snapshot.
+ * Keyboard (a11y): every button is in the tab order; ← → Home End also move along the bar. Each button
+ * has an accessible name (the tool letters alone aren't one). The rotation readout opens the free-rotation
+ * popover with the slider focused; Esc closes it and returns the focus to the readout.
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useStore } from "../lib/store";
@@ -48,8 +51,12 @@ export function Toolbar() {
   const rotation = useStore((s) => s.view.rotation);
   const info = useStore((s) => s.slide.info);
   const step = useSettings((s) => s.s.viewer.rotateStep) || 15;
+  const showToolbar = useSettings((s) => s.s.viewer.showToolbar);
   const [rotOpen, setRotOpen] = useState(false);
   const popRef = useRef<HTMLDivElement>(null);
+  const readoutRef = useRef<HTMLButtonElement>(null);
+  /** the popover was opened with the keyboard (a click has detail 0 then), so the slider takes the focus */
+  const rotByKey = useRef(false);
 
   // the rotation popover closes on a click elsewhere or Esc
   useEffect(() => {
@@ -61,42 +68,62 @@ export function Toolbar() {
     const key = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
+        e.stopPropagation();
         setRotOpen(false);
+        if (popRef.current?.contains(document.activeElement)) readoutRef.current?.focus();
       }
     };
     window.addEventListener("pointerdown", down, true);
     window.addEventListener("keydown", key, true);
+    // opened from the keyboard: straight onto the slider
+    if (rotByKey.current) popRef.current?.querySelector<HTMLElement>("input")?.focus();
     return () => {
       window.removeEventListener("pointerdown", down, true);
       window.removeEventListener("keydown", key, true);
     };
   }, [rotOpen]);
 
-  if (!info) return null;
+  if (!info || !showToolbar) return null;
   const deg = signedDeg(rotation);
+  // ← → Home End move the focus along the bar (the buttons stay in the tab order too)
+  const onBarKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+    const btns = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
+    const i = btns.indexOf(document.activeElement as HTMLButtonElement);
+    if (i < 0) return;
+    e.preventDefault();
+    const j = e.key === "Home" ? 0 : e.key === "End" ? btns.length - 1 : (i + (e.key === "ArrowRight" ? 1 : -1) + btns.length) % btns.length;
+    btns[j].focus();
+  };
   return (
     <>
-      <div className="vtool sv-toolbar" role="toolbar" aria-label="Tools">
+      <div className="vtool sv-toolbar" role="toolbar" aria-label="Tools" aria-orientation="horizontal" onKeyDown={onBarKey}>
         {TOOLS.map((t) => {
           const Icon = TOOL_ICON[t.id];
           return (
             <button
               key={t.id}
+              type="button"
               className={`tbtn tool-btn ${tool === t.id ? "on" : ""}`}
               onClick={() => setTool(t.id)}
               title={`${t.label} (${t.key.toUpperCase()})`}
+              aria-label={`${t.label} tool`}
+              aria-keyshortcuts={t.key.toUpperCase()}
               aria-pressed={tool === t.id}
             >
               <Icon />
-              <span className="tkey">{t.key.toUpperCase()}</span>
+              <span className="tkey" aria-hidden>
+                {t.key.toUpperCase()}
+              </span>
             </button>
           );
         })}
         <div className="vsep" />
-        <button className="tbtn" onClick={undo} disabled={!canUndo} title="Undo (⌘Z)" aria-label="Undo">
+        <button className="tbtn" onClick={undo} disabled={!canUndo} title="Undo (⌘Z)" aria-label="Undo" aria-keyshortcuts="Meta+Z">
           <IconUndo />
         </button>
-        <button className="tbtn" onClick={redo} disabled={!canRedo} title="Redo (⌘⇧Z)" aria-label="Redo">
+        <button className="tbtn" onClick={redo} disabled={!canRedo} title="Redo (⌘⇧Z)" aria-label="Redo" aria-keyshortcuts="Meta+Shift+Z">
           <IconRedo />
         </button>
         <div className="vsep" />
@@ -104,33 +131,46 @@ export function Toolbar() {
           className="tbtn"
           onClick={(e) => (e.shiftKey ? rotateBy(-step) : rotateStep(90, -1))}
           title={`Rotate left 90° (,) · Shift-click: ${step}° (⇧,)`}
-          aria-label="Rotate left"
+          aria-label="Rotate left 90 degrees"
+          aria-keyshortcuts=","
         >
           <IconRotL />
         </button>
-        <button className={`tbtn rot-readout ${rotOpen ? "on" : ""}`} onClick={() => setRotOpen(!rotOpen)} title="Rotation: click for free rotation" aria-label="Rotation">
+        <button
+          ref={readoutRef}
+          className={`tbtn rot-readout ${rotOpen ? "on" : ""}`}
+          onClick={(e) => {
+            rotByKey.current = e.detail === 0;
+            setRotOpen(!rotOpen);
+          }}
+          title="Rotation: click for free rotation"
+          aria-label={`Rotation ${Math.round(deg)} degrees: free rotation`}
+          aria-haspopup="dialog"
+          aria-expanded={rotOpen}
+        >
           {Math.round(deg * 10) / 10}°
         </button>
         <button
           className="tbtn"
           onClick={(e) => (e.shiftKey ? rotateBy(step) : rotateStep(90, 1))}
           title={`Rotate right 90° (.) · Shift-click: ${step}° (⇧.)`}
-          aria-label="Rotate right"
+          aria-label="Rotate right 90 degrees"
+          aria-keyshortcuts="."
         >
           <IconRotR />
         </button>
         <div className="vsep" />
-        <button className="tbtn" onClick={() => zoomBy(0.5)} title="Zoom out (−)" aria-label="Zoom out">
+        <button className="tbtn" onClick={() => zoomBy(0.5)} title="Zoom out (−)" aria-label="Zoom out" aria-keyshortcuts="-">
           <IconMinus />
         </button>
-        <button className="tbtn" onClick={zoomToFit} title="Fit the slide (0)" aria-label="Zoom to fit">
+        <button className="tbtn" onClick={zoomToFit} title="Fit the slide (0)" aria-label="Zoom to fit" aria-keyshortcuts="0">
           <IconFit />
         </button>
-        <button className="tbtn" onClick={() => zoomBy(2)} title="Zoom in (+)" aria-label="Zoom in">
+        <button className="tbtn" onClick={() => zoomBy(2)} title="Zoom in (+)" aria-label="Zoom in" aria-keyshortcuts="+">
           <IconPlus />
         </button>
         <div className="vsep" />
-        <button className="tbtn" onClick={() => fireMenu("snapshot")} title="Save the view as a PNG (⇧S)" aria-label="Snapshot">
+        <button className="tbtn" onClick={() => fireMenu("snapshot")} title="Save the view as a PNG (⇧S)" aria-label="Save the view as a PNG" aria-keyshortcuts="Shift+S">
           <IconCamera />
         </button>
       </div>

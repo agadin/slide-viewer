@@ -8,6 +8,7 @@ import { hasTauri } from "./backend";
 
 export type MenuId =
   | "open_folder" // browser
+  | "open_file" // browser: File ▸ Open Slide…
   | "rescan_folder" // browser
   | "export_ndpa" // annotations
   | "snapshot" // viewer (Snapshot.tsx)

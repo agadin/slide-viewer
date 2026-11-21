@@ -61,12 +61,118 @@ function viewerState() {
   };
 }
 
+/**
+ * How the slide really looks on screen after a layout change: the drawn image's on-screen width/height
+ * ratio (OSD's own placement × any CSS stretch of the canvas bitmap) divided by the slide's true ratio.
+ * 1.000 = undistorted.
+ */
+function aspectProbe() {
+  const v = getActiveViewer()?.viewer as unknown as {
+    world: { getItemAt(i: number): { getBounds(c: boolean): unknown } };
+    viewport: { viewportToViewerElementRectangle(r: unknown): { width: number; height: number }; getContainerSize(): { x: number; y: number } };
+    container: HTMLElement;
+  } | null;
+  const info = st().slide.info;
+  if (!v || !info) return null;
+  const host = v.container;
+  const canvases = [...document.querySelectorAll<HTMLCanvasElement>(".viewer-wrap canvas")]
+    .filter((c) => getComputedStyle(c).display !== "none" && !c.closest(".sv-nav"))
+    .map((c) => {
+      const r = c.getBoundingClientRect();
+      return { cls: c.className || "osd", bitmap: [c.width, c.height], shown: [Math.round(r.width), Math.round(r.height)], stretch: +((c.width / r.width) / (c.height / r.height)).toFixed(3) };
+    });
+  const osd = canvases.find((c) => c.cls === "osd" || c.cls === "") ?? canvases[0];
+  const rect = v.viewport.viewportToViewerElementRectangle(v.world.getItemAt(0).getBounds(true));
+  const placed = rect.width / rect.height / (info.width / info.height);
+  // a canvas bitmap wider than it's shown squeezes the picture horizontally by that factor
+  const cssStretch = osd ? 1 / osd.stretch : 1;
+  return {
+    container: [host.clientWidth, host.clientHeight],
+    osdContainerSize: [Math.round(v.viewport.getContainerSize().x), Math.round(v.viewport.getContainerSize().y)],
+    canvases,
+    placedAspect: +placed.toFixed(3),
+    displayedAspect: +(placed * cssStretch).toFixed(3),
+  };
+}
+const frame = () => new Promise((r) => requestAnimationFrame(() => r(null)));
+
+async function panelProbe() {
+  const out: unknown[] = [];
+  report.panelProbe = out;
+  const steps: [string, () => void][] = [
+    ["hide Image panel", () => st().setUi({ panelOpen: false })],
+    ["hide Slides panel", () => st().setUi({ sidebarOpen: false })],
+    ["show Image panel", () => st().setUi({ panelOpen: true })],
+    ["show Slides panel", () => st().setUi({ sidebarOpen: true })],
+  ];
+  out.push({ step: "start", t: "now", ...aspectProbe() });
+  for (const [i, [name, act]] of steps.entries()) {
+    act();
+    await frame();
+    await frame();
+    out.push({ step: name, t: "next frame", ...aspectProbe() });
+    await sleep(300);
+    out.push({ step: name, t: "0.3 s", ...aspectProbe() });
+    await sleep(1200);
+    out.push({ step: name, t: "1.5 s", ...aspectProbe() });
+    await stage(`panels-${i + 1}`, 2500);
+  }
+  await save();
+}
+
+/** README screenshots: staged scenes in the real app (the shell script captures the window at each stage) */
+async function readmeShots() {
+  const v = getActiveViewer();
+  // 1. the slide with its annotations, zoomed onto them
+  const items = st().annotations.items;
+  if (v && items.length) {
+    const { boundsNm } = await import("../lib/annotations");
+    const bs = items.map((x) => boundsNm(x));
+    const b = { minX: Math.min(...bs.map((q) => q.x0)), minY: Math.min(...bs.map((q) => q.y0)), maxX: Math.max(...bs.map((q) => q.x1)), maxY: Math.max(...bs.map((q) => q.y1)) };
+    const info = v.info;
+    if (b && info) {
+      const toImg = (x: number, y: number) => ({ x: (x - info.xOffsetNm) / (info.mppX * 1000) + info.width / 2, y: (y - info.yOffsetNm) / (info.mppY * 1000) + info.height / 2 });
+      const a = toImg(b.minX, b.minY), c = toImg(b.maxX, b.maxY);
+      const padX = (c.x - a.x) * 0.35 + 3000, padY = (c.y - a.y) * 0.35 + 3000;
+      const item = (v.viewer as unknown as { world: { getItemAt(i: number): { imageToViewportRectangle(x: number, y: number, w: number, h: number): unknown } } }).world.getItemAt(0);
+      (v.viewer.viewport as unknown as { fitBounds(r: unknown, i: boolean): void }).fitBounds(item.imageToViewportRectangle(a.x - padX, a.y - padY, c.x - a.x + 2 * padX, c.y - a.y + 2 * padY), true);
+    }
+  }
+  st().select(items[0] ? [items[0].id] : []);
+  await sleep(2500);
+  await stage("readme-annotations", 9000);
+  st().select([]);
+
+  // 2. the right-click menu over the slide
+  const canvas = document.querySelector(".openseadragon-canvas")!;
+  const r = canvas.getBoundingClientRect();
+  canvas.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.left + r.width * 0.55, clientY: r.top + r.height * 0.35, button: 2 }));
+  await sleep(400);
+  const first = document.querySelector<HTMLElement>(".ctx-menu .ctx-item");
+  first?.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+  first?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+  await sleep(600);
+  await stage("readme-menu", 9000);
+  st().setUi({ menu: null });
+
+  // 3. the Adjust tab: stain detected, haematoxylin only
+  st().setUi({ panelOpen: true, panelTab: "adjust" });
+  const auto = await import("../lib/filters/auto");
+  await auto.detectStain().catch(() => null);
+  st().setFilterParams({ stain: { mode: "he", channel: 0, vectors: null } });
+  await sleep(2500);
+  await stage("readme-adjust", 9000);
+  st().setFilterParams({ stain: { mode: "none", channel: -1, vectors: null } });
+  st().setUi({ panelTab: "annotations" });
+}
+
 async function run() {
   await sleep(1500);
   await openFolder(dir);
   const scan = await waitFor("scan", () => !st().browser.scanning && st().browser.scan);
   report.scanned = scan.entries.map((e) => ({ name: e.name, annotationCount: e.annotationCount ?? null }));
-  const entry = scan.entries[0];
+  const want = new URLSearchParams(location.search).get("open");
+  const entry = (want && scan.entries.find((e) => e.name === want)) || scan.entries[0];
   if (!entry) throw new Error("no slide found in the smoke folder");
   openEntry(entry);
   const info = await waitFor("slide info", () => st().slide.info, 60000);
@@ -77,6 +183,18 @@ async function run() {
   report.loadedAnnotations = before;
   await stage("slide-open", 4000);
   report.viewer = viewerState();
+  if (new URLSearchParams(location.search).has("readme")) {
+    await readmeShots();
+    useSettings.getState().setSection("browser", { lastFolder: null, lastSlide: null });
+    report.ok = true;
+    return;
+  }
+  if (new URLSearchParams(location.search).has("panels")) {
+    await panelProbe();
+    useSettings.getState().setSection("browser", { lastFolder: null, lastSlide: null });
+    report.ok = true;
+    return;
+  }
 
   // place a pin with the pin tool at the centre of the slide
   st().setTool("pin");
