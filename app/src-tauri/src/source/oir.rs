@@ -19,9 +19,16 @@
 //!
 //! Display: each focal plane becomes a Deep-Zoom pyramid (`pyramid.rs`) built on first use, in
 //! memory or (big stitched images) on disk in the app cache. Channels are stretched (0.1 % →
-//! 99.9 % percentiles of the nominal plane, background peak to black) and added in their colour:
-//! the LUT colour FluoView saved, else the emission wavelength, else a palette. Spectral (lambda)
-//! scans show each wavelength band in its own colour. Only the first time point is shown.
+//! 99.9 % percentiles of the nominal plane of the first time point, the same stretch for every
+//! plane and time point) and added in their colour: the LUT colour FluoView saved, else the
+//! emission wavelength, else a palette. Spectral (lambda) scans show each wavelength band in its
+//! own colour.
+//!
+//! Time series (the `t` in the UIDs): every time point is shown (`SourceInfo::time_points`, tile
+//! `z` = plane + t × `T_STRIDE`). A time point's time is its first frame's TIMELAPSE position
+//! (ms, in the frame properties), else the TIMELAPSE axis definition (start + k × step, seconds).
+//! A pyramid is built only when a (time point, plane) is first shown. Split series work the same
+//! way: chunks are found by UID, whichever file holds them.
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -35,7 +42,7 @@ use super::plain::{MAX_PIXELS, MAX_PLAUSIBLE_MPP, MEM_PIXELS};
 use super::pyramid::{Canvas, Pyramid};
 use super::vsi::{composite, wavelength_rgb, ChanLook};
 use super::zvi::{background_peak, percentile_range};
-use super::{dz_max_level, dz_tile_rect, fit, make_planes, LevelInfo, SlideSource, SourceInfo, TILE_SIZE};
+use super::{dz_max_level, dz_tile_rect, fit, make_planes, make_time_points, split_z, LevelInfo, SlideSource, SourceInfo, TILE_SIZE};
 
 pub const MAGIC: &[u8; 16] = b"OLYMPUSRAWFORMAT";
 pub const HEADER_LEN: usize = 96;
@@ -348,6 +355,8 @@ pub struct ImageMeta {
     pub size: Option<(u32, u32)>,
     /// LAMBDA axis start and step (nm), when enabled
     pub lambda: Option<(f64, f64)>,
+    /// TIMELAPSE axis start and step (s), when enabled
+    pub timelapse: Option<(f64, f64)>,
 }
 
 /// Parse an `lsmimage:imageProperties` document.
@@ -392,10 +401,11 @@ pub fn parse_image_props(xml: &str) -> ImageMeta {
         if node.name != "axis" || node.attr("enable") != Some("true") {
             continue;
         }
-        if find_text(&n, Some(k), "axis") == Some("LAMBDA") {
-            if let (Some(s), Some(st)) = (find_num(&n, Some(k), "startPosition"), find_num(&n, Some(k), "step")) {
-                m.lambda = Some((s, st));
-            }
+        let start_step = find_num(&n, Some(k), "startPosition").zip(find_num(&n, Some(k), "step"));
+        match find_text(&n, Some(k), "axis") {
+            Some("LAMBDA") => m.lambda = start_step.or(m.lambda),
+            Some("TIMELAPSE") => m.timelapse = start_step.filter(|(s, st)| s.is_finite() && st.is_finite() && *st > 0.0).or(m.timelapse),
+            _ => {}
         }
     }
     m
@@ -467,6 +477,24 @@ fn root_name(xml: &str) -> &str {
         return local(&s[..end]);
     }
     ""
+}
+
+/// Seconds since the start for each time index in `ts` (UID `t` values, sorted): the earliest
+/// TIMELAPSE position (ms) among that time point's frames, else `start + k × step` from the
+/// TIMELAPSE axis definition (s), else None.
+pub fn time_seconds(ts: &[u32], frames: &[FrameMeta], axis: Option<(f64, f64)>) -> Vec<Option<f64>> {
+    ts.iter()
+        .enumerate()
+        .map(|(k, &t)| {
+            let from_frames = frames
+                .iter()
+                .filter(|f| f.tlz.0 == t)
+                .filter_map(|f| f.axis("TIMELAPSE"))
+                .filter(|v| v.is_finite() && *v >= 0.0)
+                .fold(None, |m: Option<f64>, v| Some(m.map_or(v, |m| m.min(v))));
+            from_frames.map(|ms| ms / 1000.0).or_else(|| axis.map(|(s, st)| s + k as f64 * st))
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------- reading a file's blocks
@@ -606,9 +634,11 @@ pub struct OirSource {
     /// bytes per sample (1 or 2)
     depth: u32,
     chans: Vec<DispChan>,
-    /// (z position, display channel) → chunks
-    planes_map: HashMap<(usize, usize), PlaneChunks>,
+    /// (time position, z position, display channel) → chunks
+    planes_map: HashMap<(usize, usize, usize), PlaneChunks>,
     zs: Vec<u32>,
+    /// the UIDs' distinct `t` values, sorted (a time point's index is its position here)
+    ts: Vec<u32>,
     plane_pos: Vec<usize>,
     nominal: usize,
     looks: OnceLock<Vec<ChanLook>>,
@@ -618,8 +648,8 @@ pub struct OirSource {
 
 #[derive(Default)]
 struct PlaneCache {
-    /// z position → (pyramid, bytes in memory, last use)
-    map: HashMap<usize, (Arc<Pyramid>, u64, u64)>,
+    /// (time position, z position) → (pyramid, bytes in memory, last use)
+    map: HashMap<(usize, usize), (Arc<Pyramid>, u64, u64)>,
     clock: u64,
 }
 
@@ -675,9 +705,11 @@ impl OirSource {
             return Err(format!("{path}: image too large ({width} × {height})"));
         }
 
-        // the first time point only
-        let t0 = pixels.iter().map(|(u, _)| u.t).min().unwrap();
-        pixels.retain(|(u, _)| u.t == t0);
+        // time points: the distinct t values (all 0 without a time axis)
+        let mut ts: Vec<u32> = pixels.iter().map(|(u, _)| u.t).collect();
+        ts.sort();
+        ts.dedup();
+        let t0 = ts[0];
         let mut zs: Vec<u32> = pixels.iter().map(|(u, _)| u.z).collect();
         zs.sort();
         zs.dedup();
@@ -738,12 +770,13 @@ impl OirSource {
 
         // planes: chunks in chunk order, each with its byte offset in the plane
         let zpos = |z: u32| zs.binary_search(&z).unwrap();
-        let mut grouped: HashMap<(usize, usize), Vec<(u32, Chunk)>> = HashMap::new();
+        let tpos = |t: u32| ts.binary_search(&t).unwrap();
+        let mut grouped: HashMap<(usize, usize, usize), Vec<(u32, Chunk)>> = HashMap::new();
         for (u, c) in &pixels {
             let Some(ci) = chans.iter().position(|d| d.guid == u.guid && d.l == u.l) else { continue };
-            grouped.entry((zpos(u.z), ci)).or_default().push((u.chunk, *c));
+            grouped.entry((tpos(u.t), zpos(u.z), ci)).or_default().push((u.chunk, *c));
         }
-        let planes_map: HashMap<(usize, usize), PlaneChunks> = grouped
+        let planes_map: HashMap<(usize, usize, usize), PlaneChunks> = grouped
             .into_iter()
             .map(|(k, mut v)| {
                 v.sort_by_key(|(n, _)| *n);
@@ -763,7 +796,7 @@ impl OirSource {
 
         // focal planes: the Z step, else the frames' Z positions
         let nominal = (zs.len() - 1) / 2;
-        let zpos_um: Vec<Option<f64>> = zs.iter().map(|&z| frames.iter().find(|f| f.tlz.2 == z && f.tlz.0 <= t0.max(1)).and_then(|f| f.axis("ZSTACK"))).collect();
+        let zpos_um: Vec<Option<f64>> = zs.iter().map(|&z| frames.iter().find(|f| f.tlz.2 == z && f.tlz.0 == t0).and_then(|f| f.axis("ZSTACK"))).collect();
         let offsets: Vec<Option<f64>> = if zs.len() <= 1 {
             vec![]
         } else if let Some(dz) = meta.z_step_um {
@@ -784,6 +817,7 @@ impl OirSource {
             info.calibrated = true;
         }
         info.z_planes = z_planes;
+        info.time_points = make_time_points(&time_seconds(&ts, &frames, meta.timelapse));
         info.levels = super::pyramid::level_sizes(width, height)
             .iter()
             .enumerate()
@@ -801,6 +835,7 @@ impl OirSource {
             chans,
             planes_map,
             zs,
+            ts,
             plane_pos,
             nominal,
             looks: OnceLock::new(),
@@ -812,6 +847,11 @@ impl OirSource {
     /// Channel names and colours (for tests and logs).
     pub fn channel_summary(&self) -> Vec<(String, [u8; 3])> {
         self.chans.iter().map(|c| (c.name.clone(), c.color.map(|v| (v * 255.0).round() as u8))).collect()
+    }
+
+    /// Number of time points (1 without a time axis).
+    pub fn t_count(&self) -> usize {
+        self.ts.len()
     }
 
     /// Number of distinct Z planes.
@@ -844,7 +884,7 @@ impl OirSource {
         })
     }
 
-    /// Each channel's colour and stretch, from the nominal plane.
+    /// Each channel's colour and stretch, from the nominal plane of the first time point.
     fn looks(&self) -> Result<&Vec<ChanLook>, String> {
         if let Some(l) = self.looks.get() {
             return Ok(l);
@@ -854,7 +894,7 @@ impl OirSource {
         let mut out = Vec::new();
         for (ci, ch) in self.chans.iter().enumerate() {
             let mut hist = vec![0u64; n];
-            if let Some(chunks) = self.planes_map.get(&(self.nominal, ci)) {
+            if let Some(chunks) = self.planes_map.get(&(0, self.nominal, ci)) {
                 let xstep = (self.width as usize / 2048).max(1);
                 for y in (0..self.height).step_by(step as usize) {
                     for &v in self.read_rows(chunks, y, y + 1)?.iter().step_by(xstep) {
@@ -873,8 +913,8 @@ impl OirSource {
         Ok(self.looks.get().unwrap())
     }
 
-    /// Composite z position `zp` onto the canvas, a band of rows at a time.
-    fn paint(&self, zp: usize, c: &mut Canvas) -> Result<(), String> {
+    /// Composite time position `tp`, z position `zp` onto the canvas, a band of rows at a time.
+    fn paint(&self, tp: usize, zp: usize, c: &mut Canvas) -> Result<(), String> {
         let looks = self.looks()?;
         let band = ((BAND_PIXELS / self.width as u64).max(1) as u32).min(self.height);
         let mut y0 = 0;
@@ -882,7 +922,7 @@ impl OirSource {
             let y1 = (y0 + band).min(self.height);
             let mut data = Vec::new();
             for (ci, look) in looks.iter().enumerate() {
-                if let Some(chunks) = self.planes_map.get(&(zp, ci)) {
+                if let Some(chunks) = self.planes_map.get(&(tp, zp, ci)) {
                     let v: Vec<f32> = self.read_rows(chunks, y0, y1)?.into_iter().map(|s| s as f32).collect();
                     data.push((look, v));
                 }
@@ -896,20 +936,23 @@ impl OirSource {
         Ok(())
     }
 
-    /// Build (or fetch) the pyramid of z position `zp`.
-    fn plane(&self, zp: usize) -> Result<Arc<Pyramid>, String> {
-        if let Some(p) = self.cached_plane(zp) {
+    /// Build (or fetch) the pyramid of time position `tp`, z position `zp`.
+    fn plane(&self, tp: usize, zp: usize) -> Result<Arc<Pyramid>, String> {
+        let key = (tp, zp);
+        if let Some(p) = self.cached_plane(key) {
             return Ok(p);
         }
         let _g = self.build.lock().unwrap();
-        if let Some(p) = self.cached_plane(zp) {
+        if let Some(p) = self.cached_plane(key) {
             return Ok(p);
         }
         let (w, h) = (self.width, self.height);
         let big = w as u64 * h as u64 > MEM_PIXELS;
         let pyr = if big {
             let root = cache_dir("oir");
-            let dir = root.join(cache_key(&self.path)).join(format!("z{zp}"));
+            // the first time point keeps the plain `z<n>` name (folders cached before time series)
+            let sub = if tp == 0 { format!("z{zp}") } else { format!("t{tp}z{zp}") };
+            let dir = root.join(cache_key(&self.path)).join(sub);
             if let Some(p) = open_cached(&dir, w, h) {
                 p
             } else {
@@ -917,14 +960,14 @@ impl OirSource {
                 std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
                 let _ = std::fs::remove_file(dir.join("complete"));
                 let mut c = Canvas::disk(&dir.join("L0.rgb"), w, h)?;
-                self.paint(zp, &mut c)?;
+                self.paint(tp, zp, &mut c)?;
                 let p = Pyramid::on_disk(c, &dir, MEM_PIXELS / 4)?;
                 std::fs::write(dir.join("complete"), format!("{w} {h}")).map_err(|e| e.to_string())?;
                 p
             }
         } else {
             let mut c = Canvas::Mem(RgbImage::new(w, h));
-            self.paint(zp, &mut c)?;
+            self.paint(tp, zp, &mut c)?;
             let Canvas::Mem(img) = c else { unreachable!() };
             Pyramid::in_memory(img)?
         };
@@ -933,7 +976,7 @@ impl OirSource {
         let mut pc = self.planes.lock().unwrap();
         pc.clock += 1;
         let now = pc.clock;
-        pc.map.insert(zp, (pyr.clone(), bytes, now));
+        pc.map.insert(key, (pyr.clone(), bytes, now));
         while pc.map.len() > 1 && pc.map.values().map(|v| v.1).sum::<u64>() > MEM_PLANE_BUDGET {
             let oldest = *pc.map.iter().min_by_key(|(_, v)| v.2).unwrap().0;
             pc.map.remove(&oldest);
@@ -941,22 +984,28 @@ impl OirSource {
         Ok(pyr)
     }
 
-    fn cached_plane(&self, zp: usize) -> Option<Arc<Pyramid>> {
+    fn cached_plane(&self, key: (usize, usize)) -> Option<Arc<Pyramid>> {
         let mut pc = self.planes.lock().unwrap();
         pc.clock += 1;
         let now = pc.clock;
-        pc.map.get_mut(&zp).map(|e| {
+        pc.map.get_mut(&key).map(|e| {
             e.2 = now;
             e.0.clone()
         })
     }
 
-    fn zpos(&self, z: u32) -> usize {
-        self.plane_pos.get(z as usize).copied().unwrap_or(self.nominal)
+    /// (time position, z position) of a tile `z` (plane + t × `T_STRIDE`).
+    fn pos(&self, z: u32) -> Result<(usize, usize), String> {
+        let (plane, t) = split_z(z);
+        if t as usize >= self.ts.len() {
+            return Err(format!("{}: no time point {t} ({} time points)", self.path, self.ts.len()));
+        }
+        Ok((t as usize, self.plane_pos.get(plane as usize).copied().unwrap_or(self.nominal)))
     }
 
     fn fitted(&self, max_px: u32, z: u32) -> Result<RgbImage, String> {
-        let pyr = self.plane(self.zpos(z))?;
+        let (tp, zp) = self.pos(z)?;
+        let pyr = self.plane(tp, zp)?;
         let k = pyr.level_at_least(max_px);
         let (w, h) = pyr.levels[k].size();
         let img = pyr.crop(k, 0, 0, w, h)?;
@@ -973,7 +1022,8 @@ impl SlideSource for OirSource {
     fn tile(&self, level: u32, x: u32, y: u32, z: u32) -> Result<RgbImage, String> {
         let (_, _, _, _, tw, th) = dz_tile_rect(self.info.width, self.info.height, level, x, y)?;
         let native = (dz_max_level(self.info.width, self.info.height) - level) as usize;
-        self.plane(self.zpos(z))?.crop(native, x * TILE_SIZE, y * TILE_SIZE, tw, th)
+        let (tp, zp) = self.pos(z)?;
+        self.plane(tp, zp)?.crop(native, x * TILE_SIZE, y * TILE_SIZE, tw, th)
     }
 
     fn associated(&self, name: &str) -> Result<RgbImage, String> {
@@ -1024,6 +1074,7 @@ fn prune(root: &Path, path: &str) {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::source::T_STRIDE;
 
     const G1: &str = "11111111-aaaa-4bbb-8ccc-000000000001";
     const G2: &str = "22222222-aaaa-4bbb-8ccc-000000000002";
@@ -1106,13 +1157,23 @@ pub(crate) mod tests {
         }
         s += &format!("</commonimage:phase><commonimage:width>{w}</commonimage:width><commonimage:height>{h}</commonimage:height></commonimage:imageInfo>");
         s += r#"<commonparam:axis enable="true"><commonparam:axis>ZSTACK</commonparam:axis><commonparam:startPosition>0</commonparam:startPosition><commonparam:step>1.0</commonparam:step></commonparam:axis>"#;
+        s += r#"<commonparam:axis enable="true" lockStep="false"><commonparam:axis>TIMELAPSE</commonparam:axis><commonparam:startPosition>0.0</commonparam:startPosition><commonparam:endPosition>150.0</commonparam:endPosition><commonparam:step>30.0</commonparam:step><commonparam:maxSize>5</commonparam:maxSize></commonparam:axis>"#;
+        s += r#"<commonparam:axis enable="false"><commonparam:axis>LAMBDA</commonparam:axis><commonparam:startPosition>400.0</commonparam:startPosition><commonparam:step>10.0</commonparam:step></commonparam:axis>"#;
         s += "</lsmimage:imageProperties>";
         s
     }
 
     pub fn frame_props(id: &str, w: u32, h: u32, z_um: f64) -> String {
+        frame_props_t(id, w, h, z_um, None)
+    }
+
+    /// A frame with a TIMELAPSE position (ms) too.
+    pub fn frame_props_t(id: &str, w: u32, h: u32, z_um: f64, t_ms: Option<f64>) -> String {
+        let t = t_ms
+            .map(|ms| format!("<commonframe:axisValue><commonframe:axisType>TIMELAPSE</commonframe:axisType><commonframe:position>{ms}</commonframe:position></commonframe:axisValue>"))
+            .unwrap_or_default();
         format!(
-            r#"<?xml version="1.0" encoding="ASCII"?><lsmframe:frameProperties xmlns:lsmframe="a" xmlns:base="b" xmlns:commonframe="c" id="{id}"><lsmframe:imageDefinition><base:colorType>GlayScale</base:colorType><base:width>{w}</base:width><base:height>{h}</base:height><base:depth>2</base:depth><base:bitCounts>12</base:bitCounts></lsmframe:imageDefinition><commonframe:axisValue><commonframe:axisType>ZSTACK</commonframe:axisType><commonframe:position>{z_um}</commonframe:position></commonframe:axisValue></lsmframe:frameProperties>"#
+            r#"<?xml version="1.0" encoding="ASCII"?><lsmframe:frameProperties xmlns:lsmframe="a" xmlns:base="b" xmlns:commonframe="c" id="{id}"><lsmframe:imageDefinition><base:colorType>GlayScale</base:colorType><base:width>{w}</base:width><base:height>{h}</base:height><base:depth>2</base:depth><base:bitCounts>12</base:bitCounts></lsmframe:imageDefinition><commonframe:axisValue><commonframe:axisType>ZSTACK</commonframe:axisType><commonframe:position>{z_um}</commonframe:position></commonframe:axisValue>{t}</lsmframe:frameProperties>"#
         )
     }
 
@@ -1168,9 +1229,13 @@ pub(crate) mod tests {
         assert_eq!(m.pixel_um, Some((0.4143, 0.4143)));
         assert_eq!(m.z_step_um, Some(0.5));
         assert_eq!(m.size, Some((64, 48)), "the image's width, not a channel's");
+        assert_eq!(m.timelapse, Some((0.0, 30.0)));
+        assert_eq!(m.lambda, None, "a disabled axis is ignored");
         let f = parse_frame(&frame_props("z002t001_0_1", 64, 48, 4151.7));
         assert_eq!((f.tlz, f.width, f.height, f.depth), ((1, 0, 2), 64, 48, 2));
         assert_eq!(f.axis("ZSTACK"), Some(4151.7));
+        let f = parse_frame(&frame_props_t("z008t005_0_1", 64, 48, 4903.91, Some(135743.168)));
+        assert_eq!((f.tlz, f.axis("TIMELAPSE")), ((5, 0, 8), Some(135743.168)));
         assert_eq!(parse_lut_color(&lut("Cyan", [0, 1, 1])), Some([0.0, 1.0, 1.0]));
         assert_eq!(parse_lut_color(&lut("Gray", [1, 1, 1])), None);
         // documents and the GUID before each
@@ -1194,9 +1259,26 @@ pub(crate) mod tests {
         assert_eq!(n[0].end, 5);
     }
 
+    #[test]
+    fn time_points() {
+        let fr = |t: u32, z: u32, ms: Option<f64>| parse_frame(&frame_props_t(&format!("z{z:03}t{t:03}_0_1"), 8, 8, 0.0, ms));
+        // the earliest frame of each time point (later Z planes are acquired later)
+        let frames = vec![fr(1, 1, Some(0.0)), fr(1, 2, Some(2249.0)), fr(2, 2, Some(32249.0)), fr(2, 1, Some(30000.0)), fr(3, 1, Some(60000.0))];
+        assert_eq!(time_seconds(&[1, 2, 3], &frames, Some((0.0, 30.0))), vec![Some(0.0), Some(30.0), Some(60.0)]);
+        // frames without a time: the axis definition; neither: None
+        let bare = vec![fr(1, 1, None), fr(2, 1, None)];
+        assert_eq!(time_seconds(&[1, 2], &bare, Some((0.0, 2.5))), vec![Some(0.0), Some(2.5)]);
+        assert_eq!(time_seconds(&[1, 2], &bare, None), vec![None, None]);
+        // no time axis at all (t = 0 in the UIDs): one time point, so no time slider
+        assert!(make_time_points(&time_seconds(&[0], &bare, None)).is_empty());
+        let tp = make_time_points(&time_seconds(&[1, 2, 3], &frames, None));
+        assert_eq!(tp.iter().map(|t| t.label.as_str()).collect::<Vec<_>>(), ["0 s", "30 s", "1 min 0 s"]);
+    }
+
     /// A two-channel, three-plane 16-bit stack: channel 1 bright on the left, channel 2 on the
-    /// right, the planes dimmer away from the middle. With `split`, the last plane's chunks are
-    /// in a companion file.
+    /// right, the planes dimmer away from the middle, at two time points (2.5 s apart). The second
+    /// has only channel 1, saturated, and only in the middle plane. With `split`, the last plane's
+    /// chunks and the second time point are in a companion file.
     fn synthetic(dir: &Path, split: bool) -> PathBuf {
         let (w, h) = (40u32, 30u32);
         let mut wr = Writer::new();
@@ -1205,7 +1287,7 @@ pub(crate) mod tests {
         let mut comp = Writer::new();
         for z in 1..=3u32 {
             let id = format!("z{z:03}t001");
-            wr.frame(&frame_props(&format!("{id}_0_1"), w, h, 100.0 + z as f64 * 0.5));
+            wr.frame(&frame_props_t(&format!("{id}_0_1"), w, h, 100.0 + z as f64 * 0.5, Some(z as f64 * 100.0)));
             for (gi, g) in [G1, G2].iter().enumerate() {
                 let px: Vec<u8> = (0..w * h)
                     .flat_map(|i| {
@@ -1220,8 +1302,11 @@ pub(crate) mod tests {
                 target.plane(&id, g, &px, 7 * 40 * 2 + 6);
             }
         }
-        // a second time point is ignored
-        wr.plane("z002t002", G1, &vec![0xFF; (w * h * 2) as usize], 1000);
+        // the second time point
+        wr.frame(&frame_props_t("z002t002_0_1", w, h, 101.0, Some(2600.0)));
+        wr.frame(&frame_props_t("z001t002_0_1", w, h, 100.5, Some(2500.0)));
+        let target = if split { &mut comp } else { &mut wr };
+        target.plane("z002t002", G1, &vec![0xFF; (w * h * 2) as usize], 1000);
         let p = dir.join("stack.oir");
         std::fs::write(&p, wr.finish()).unwrap();
         if split {
@@ -1267,6 +1352,17 @@ pub(crate) mod tests {
             let top = s.tile(max, 0, 0, 2).unwrap();
             assert!(top.get_pixel(2, 2).0[1] > 0 && top.get_pixel(2, 2).0[1] < 128, "{:?}", top.get_pixel(2, 2));
             assert_eq!(s.overview(20, 0).unwrap().dimensions(), (20, 15));
+            // the second time point: 2.5 s (its earliest frame), saturated channel 1 only
+            assert_eq!(s.t_count(), 2);
+            let tp: Vec<_> = i.time_points.iter().map(|t| (t.index, t.seconds, t.label.as_str())).collect();
+            assert_eq!(tp, vec![(0, Some(0.1), "0.1 s"), (1, Some(2.5), "2.5 s")]);
+            let t1 = s.tile(max, 0, 0, T_STRIDE).unwrap();
+            assert_eq!(t1.get_pixel(38, 29).0, [0, 255, 255], "t 1: channel 1 everywhere");
+            assert_eq!(s.tile(max, 0, 0, 0).unwrap().get_pixel(38, 29).0, r, "t 0 unchanged");
+            // a plane missing at t 1 is black; a time point past the end is an error
+            assert_eq!(s.tile(max, 0, 0, 2 + T_STRIDE).unwrap().get_pixel(2, 2).0, [0, 0, 0]);
+            assert!(s.tile(max, 0, 0, 2 * T_STRIDE).is_err());
+            assert_eq!(s.overview(20, T_STRIDE).unwrap().get_pixel(19, 14).0, [0, 255, 255]);
             let _ = std::fs::remove_dir_all(&dir);
         }
     }
@@ -1301,10 +1397,11 @@ pub(crate) mod tests {
         let s = OirSource::open(p.to_str().unwrap()).unwrap();
         let i = s.info();
         assert_eq!((i.width, i.height, s.z_count(), s.companion_count(), s.chans.len()), (3554, 2540, 53, 1, 2));
+        assert!(i.time_points.is_empty() && s.t_count() == 1, "no time axis");
         // z position, per channel: (sum, pixel (2000, 1000)) as `oirfile` reads them
         for (zp, want) in [(26usize, [(2484246997u64, 436u16), (724690405, 176)]), (45, [(734637004, 59), (46013509, 0)])] {
             for (ci, (sum, px)) in want.into_iter().enumerate() {
-                let v = s.read_rows(&s.planes_map[&(zp, ci)], 0, s.height).unwrap();
+                let v = s.read_rows(&s.planes_map[&(0, zp, ci)], 0, s.height).unwrap();
                 assert_eq!(v.iter().map(|&x| x as u64).sum::<u64>(), sum, "z {zp} channel {ci}");
                 assert_eq!(v[1000 * 3554 + 2000], px, "z {zp} channel {ci}");
             }
@@ -1347,10 +1444,12 @@ pub(crate) mod tests {
             let s = OirSource::open(&p).unwrap();
             let i = s.info();
             eprintln!("{name}: {:?} z {:?}", s.channel_summary(), i.z_planes.iter().map(|z| &z.label).collect::<Vec<_>>());
+            let tn = if name.starts_with("1202-interval") { 5 } else { 0 };
+            assert_eq!(i.time_points.len(), tn, "{name}");
             assert_eq!((i.width, i.height, s.z_count(), s.chans.len()), (size, size, nz, sums.len()), "{name}");
             assert!(i.calibrated && (i.mpp_x - mpp).abs() < 1e-4, "{name}: {}", i.mpp_x);
             for (ci, &(sum, px)) in sums.iter().enumerate() {
-                let v = s.read_rows(&s.planes_map[&(s.nominal, ci)], 0, s.height).unwrap();
+                let v = s.read_rows(&s.planes_map[&(0, s.nominal, ci)], 0, s.height).unwrap();
                 assert_eq!(v.iter().map(|&x| x as u64).sum::<u64>(), sum, "{name} channel {ci}");
                 assert_eq!(v[200 * 512 + 100], px, "{name} channel {ci}");
             }
@@ -1364,6 +1463,53 @@ pub(crate) mod tests {
             // fluorescence: a mostly dark background with some signal
             let mean: f64 = o.as_raw().iter().map(|&v| v as f64).sum::<f64>() / o.as_raw().len() as f64;
             assert!(mean > 3.0 && mean < 160.0, "{name}: mean {mean}");
+        }
+    }
+
+    /// The 30 s interval series (5 time points × 8 planes × 2 channels): every time point's
+    /// nominal plane against `oirfile`, and the time labels from the frames' TIMELAPSE positions.
+    #[test]
+    #[ignore]
+    fn real_oir_time_series() {
+        let name = "1202-interval_30sec_sequence_frame_z stack.oir";
+        let Some(p) = sample(name) else {
+            eprintln!("skip {name}: not downloaded");
+            return;
+        };
+        let s = OirSource::open(&p).unwrap();
+        let i = s.info();
+        let tp: Vec<_> = i.time_points.iter().map(|t| (t.index, t.seconds, t.label.as_str())).collect();
+        assert_eq!(
+            tp,
+            vec![(0, Some(0.0), "0 s"), (1, Some(30.0), "30 s"), (2, Some(60.0), "1 min 0 s"), (3, Some(90.0), "1 min 30 s"), (4, Some(120.0), "2 min 0 s")]
+        );
+        // time point → per channel (sum, pixel (100, 200)) of z position 3, as `oirfile` reads them
+        let want: [[(u64, u16); 2]; 5] = [
+            [(183008807, 1275), (146700485, 231)],
+            [(184364366, 1472), (146018634, 252)],
+            [(180277436, 858), (143238147, 314)],
+            [(178079175, 1118), (141942082, 291)],
+            [(180650287, 1107), (142254938, 527)],
+        ];
+        assert_eq!(s.nominal, 3);
+        for (t, chans) in want.iter().enumerate() {
+            for (ci, &(sum, px)) in chans.iter().enumerate() {
+                let v = s.read_rows(&s.planes_map[&(t, 3, ci)], 0, s.height).unwrap();
+                assert_eq!(v.iter().map(|&x| x as u64).sum::<u64>(), sum, "t {t} channel {ci}");
+                assert_eq!(v[200 * 512 + 100], px, "t {t} channel {ci}");
+            }
+        }
+        // the rendered time points differ (same stretch), and each is built only when asked for
+        assert!(s.planes.lock().unwrap().map.is_empty());
+        let o0 = s.overview(512, 0).unwrap();
+        let o4 = s.overview(512, 4 * T_STRIDE).unwrap();
+        assert_eq!(s.planes.lock().unwrap().map.len(), 2);
+        let diff = o0.as_raw().iter().zip(o4.as_raw()).filter(|(a, b)| a != b).count();
+        assert!(diff > o0.as_raw().len() / 20, "time points 0 and 4 look the same ({diff} bytes differ)");
+        if let Ok(d) = std::env::var("OIR_PNG_DIR") {
+            for t in 0..5u32 {
+                s.overview(512, t * T_STRIDE).unwrap().save(Path::new(&d).join(format!("{name}.t{t}.png"))).unwrap();
+            }
         }
     }
 }
