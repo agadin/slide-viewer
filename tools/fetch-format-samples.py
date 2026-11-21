@@ -84,4 +84,28 @@ for rel, sha, size in OME_FILES:
     if h.hexdigest() != sha:
         print(f"CHECKSUM MISMATCH CellSens/evident/{rel}", flush=True); os.remove(dest); continue
     print(f"ok CellSens/evident/{rel}", flush=True)
+# Leica .lif from the OME sample image server (no published checksums: these pin the tested files).
+# Each folder's COPYING is CC BY 4.0: Project007 (c) Peter Zentis (zenodo 6606445; 4-channel z-stacks
+# and a 2 x 2 TileScan), the FRET test (c) Nicolas Chiaruttini (image.sc 30856; 8 two-channel series),
+# PR2729 (c) Michael Goelzer (a small 2 x 2 TileScan z-stack time series).
+LIF = "https://downloads.openmicroscopy.org/images/Leica-LIF/"
+LIF_FILES = [
+    ("zenodo-6606445/Project007.lif", "a4bc49b2fb9f1adf3a66872d01e1450db1d898fc7f4d2386aefa28836c2ec419", 111643445),
+    ("imagesc-30856/20191025 Test FRET 585. 423, 426.lif", "8d4ee62868b9616b832c2eb28e7d62ec050fb032e0bc11ea0a392f5c84390c71", 49313199),
+    ("michael/PR2729_frameOrderCombinedScanTypes.lif", "17994bb1bdf93dd1a34a19ed53e5a3d7f672470a8057e2998e25d2474437a052", 227429),
+]
+for rel, sha, size in LIF_FILES:
+    dest = os.path.join(OUT, "Leica-LIF", os.path.basename(rel))
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    if not (os.path.exists(dest) and os.path.getsize(dest) == size):
+        print(f"downloading Leica-LIF/{rel} ({size/1e6:.0f} MB)", flush=True)
+        urllib.request.urlretrieve(LIF + urllib.parse.quote(rel), dest + ".part")
+        os.replace(dest + ".part", dest)
+    h = hashlib.sha256()
+    with open(dest, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    if h.hexdigest() != sha:
+        print(f"CHECKSUM MISMATCH Leica-LIF/{rel}", flush=True); os.remove(dest); continue
+    print(f"ok Leica-LIF/{rel}", flush=True)
 print("DONE", flush=True)
