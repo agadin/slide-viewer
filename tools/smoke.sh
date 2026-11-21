@@ -50,7 +50,8 @@ SWIFT
 
 cd "$ROOT/app"
 set -m # own process group, so we stop exactly what we started
-npx tauri dev --config "$CONFIG" >"$SCRATCH/tauri-dev.log" 2>&1 &
+# SMOKE_RELEASE=1: optimised backend (debug builds decode big microscope frames many times slower)
+npx tauri dev ${SMOKE_RELEASE:+--release} --config "$CONFIG" >"$SCRATCH/tauri-dev.log" 2>&1 &
 LEADER=$!
 PGID=$(ps -o pgid= -p "$LEADER" | tr -d ' ')
 set +m
@@ -64,7 +65,7 @@ while [ $SECONDS -lt $deadline ]; do
     stage=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("stage",""))' "$REPORT" 2>/dev/null || true)
     if [ -n "$stage" ] && [ "$stage" != "$seen" ]; then
       seen="$stage"
-      APP_PID=$(ps -o pid=,pgid=,command= -ax | awk -v g="$PGID" '$2==g && $3 ~ /target\/debug\/app$/ && !p {p=$1} END {print p}' || true)
+      APP_PID=$(ps -o pid=,pgid=,command= -ax | awk -v g="$PGID" '$2==g && $3 ~ /target\/(debug|release)\/app$/ && !p {p=$1} END {print p}' || true)
       if [ -n "$APP_PID" ]; then
         WID=$(swift "$WINID_SWIFT" "$APP_PID" 2>/dev/null || true)
         sleep 1

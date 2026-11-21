@@ -260,11 +260,13 @@ async function run() {
   const series = st().slide.info?.series ?? [];
   if (series.length > 1 && st().slide.path) {
     const n = st().annotations.items.length;
+    const t0 = Date.now();
     await st().openSlide(st().slide.path!, series.length - 1);
     const si = await waitFor("other image", () => (st().slide.info?.seriesIndex === series.length - 1 ? st().slide.info : null), 60000);
-    await waitFor("other image drawn", () => viewerState().fullyLoaded, 30000);
+    await waitFor("other image drawn", () => viewerState().fullyLoaded, 120000);
+    const drawnMs = Date.now() - t0;
     await sleep(800);
-    report.series = { index: si.seriesIndex, name: series[si.seriesIndex], width: si.width, height: si.height, annotationsKept: st().annotations.items.length === n, error: st().slide.error };
+    report.series = { drawnMs, index: si.seriesIndex, name: series[si.seriesIndex], width: si.width, height: si.height, annotationsKept: st().annotations.items.length === n, error: st().slide.error };
     await stage("series-last", 3500);
   }
 
