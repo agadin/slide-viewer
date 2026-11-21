@@ -22,6 +22,7 @@ Every file is shown the same way: zoom and pan, pins and rulers, adjustments. An
 | Sakura | `.svslide` | |
 | DICOM | `.dcm` (whole-slide) | Open any `.dcm` file of the series; the rest of the series must be in the same folder. |
 | Zeiss | `.czi` | Brightfield and fluorescence (channels are coloured with the settings saved in the file). Z-stacks show every plane: see [Focal planes](viewing.md#focal-planes). Several scenes in one file are shown together. |
+| Zeiss AxioVision | `.zvi` | The older Zeiss format. Fluorescence channels are combined in the colours saved in the file, with brightness stretched so faint signals show. Z-stacks show every plane, and mosaics are assembled from their tiles. The first time a large mosaic opens it is prepared and kept in the app's cache. |
 | Ordinary pictures | `.jpg`, `.jpeg`, `.png`, `.bmp`, `.webp`, flat `.tif` | Photos, screenshots and stitched images. Very large flat TIFFs are prepared once and kept in the app's cache, so the next time they open at once. Usually [uncalibrated](measuring.md#uncalibrated-slides). |
 
 Slides are read with [OpenSlide](https://openslide.org) and, for Zeiss files, [libCZI](https://github.com/ZEISS/libczi). Both are built into the app. The label, macro and thumbnail pictures a scanner saves are used where the file has them.
@@ -55,5 +56,5 @@ See [Where annotations are saved](annotating.md#where-annotations-are-saved) for
 ## Other files the app makes
 
 - **Thumbnails** for the slide browser are kept in the app's cache folder, never next to your slides. Deleting them is safe; they're made again.
-- **Prepared pyramids** of very large plain TIFF and picture files are kept in the app's cache folder too (the six most recent), so they reopen instantly.
+- **Prepared pyramids** of very large plain TIFF and picture files and Zeiss `.zvi` mosaics are kept in the app's cache folder too (the six most recent), so they reopen instantly.
 - **Snapshots** are PNG pictures, saved where you choose.
