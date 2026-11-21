@@ -419,6 +419,10 @@ export function useAnnouncements(): void {
           clearTimeout(rotTimer);
           rotTimer = setTimeout(() => announce(rotationMessage(useStore.getState().view.rotation)), ROTATE_DELAY);
         }
+        if (prev.slide.info && s.slide.info !== prev.slide.info && s.slide.path === prev.slide.path && s.slide.info.seriesIndex !== prev.slide.info.seriesIndex) {
+          const i = s.slide.info;
+          announce(`${i.seriesKind} ${i.seriesIndex + 1} of ${i.series.length}: ${i.series[i.seriesIndex] ?? ""}. ${slideFacts({ ...i, series: [] })}.`);
+        }
         if (s.view.z !== prev.view.z) {
           const m = planeMessage(s.slide.info, s.view.z);
           if (m) announce(m);

@@ -239,6 +239,35 @@ async function run() {
   st().setFilterParams({ gamma: 1, contrast: 0 });
   st().setUi({ panelTab: "annotations" });
 
+  // time series: last time point, then play for a few frames (TimeBar)
+  const times = st().slide.info?.timePoints ?? [];
+  if (times.length > 1) {
+    st().setView({ t: times[times.length - 1].index });
+    await waitFor("last time point drawn", () => viewerState().items === 1 && viewerState().fullyLoaded, 30000);
+    report.timeLast = { t: st().view.t, label: times[times.length - 1].label, bar: !!document.querySelector(".sv-timebar input[type=range]") };
+    await stage("time-last", 3000);
+    st().setView({ t: times[0].index, playing: true });
+    const seen = new Set<number>();
+    const t0 = Date.now();
+    while (Date.now() - t0 < 3000) {
+      seen.add(st().view.t);
+      await sleep(100);
+    }
+    st().setView({ playing: false });
+    report.timePlayed = [...seen];
+  }
+  // multi-image file: switch to the last image; the annotations (they belong to the file) stay
+  const series = st().slide.info?.series ?? [];
+  if (series.length > 1 && st().slide.path) {
+    const n = st().annotations.items.length;
+    await st().openSlide(st().slide.path!, series.length - 1);
+    const si = await waitFor("other image", () => (st().slide.info?.seriesIndex === series.length - 1 ? st().slide.info : null), 60000);
+    await waitFor("other image drawn", () => viewerState().fullyLoaded, 30000);
+    await sleep(800);
+    report.series = { index: si.seriesIndex, name: series[si.seriesIndex], width: si.width, height: si.height, annotationsKept: st().annotations.items.length === n, error: st().slide.error };
+    await stage("series-last", 3500);
+  }
+
   // don't reopen the scratch folder next time the app starts
   useSettings.getState().setSection("browser", { lastFolder: null, lastSlide: null });
   report.ok = report.savedHasPin === true && before.length > 0;

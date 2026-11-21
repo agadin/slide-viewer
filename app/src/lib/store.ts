@@ -233,7 +233,8 @@ export const useStore = create<Store>((set, get) => ({
         backendOpen.add(info.id);
         if (get().slide.path === path)
           set((s) => ({
-            slide: { ...s.slide, info, loading: false, openNonce: s.slide.openNonce + 1 },
+            // no openNonce bump: that means "a new file opened" (reload its annotations, announce it)
+            slide: { ...s.slide, info, loading: false },
             view: { ...s.view, z: 0, playing: false, t: Math.min(s.view.t, Math.max(0, info.timePoints.length - 1)) },
             filters: { ...s.filters, auto: initialAuto, analysis: null },
           }));

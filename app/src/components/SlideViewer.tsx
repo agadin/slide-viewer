@@ -117,7 +117,11 @@ export function SlideViewer() {
   const vs = useViewerSettings(); // a11y(visual): animate is off while Reduce motion is on
 
   const hostRef = useRef<HTMLDivElement>(null);
-  const [viewer, setViewer] = useState<OpenSeadragon.Viewer | null>(null);
+  // the viewer and the SlideInfo it was made for. Another image of the same file (Image / Position picker)
+  // replaces `info` without going through null, so for one render the old, already destroyed viewer is
+  // still in state: `viewer` is only the live one when it was made for this `info`
+  const [made, setMade] = useState<{ v: OpenSeadragon.Viewer; info: SlideInfo } | null>(null);
+  const viewer = made && made.info === info ? made.v : null;
   const frameCbs = useRef(new Set<() => void>());
   const zRef = useRef(z);
   zRef.current = z;
@@ -214,12 +218,12 @@ export function SlideViewer() {
     labelViewerElement(v, info);
     hideCanvases(host);
 
-    setViewer(v);
+    setMade({ v, info });
     setActiveViewer(v, info);
     return () => {
       cancelAnimationFrame(raf);
       setActiveViewer(null, null);
-      setViewer(null);
+      setMade((m) => (m?.v === v ? null : m));
       releaseViewer(v);
     };
   }, [info]);
