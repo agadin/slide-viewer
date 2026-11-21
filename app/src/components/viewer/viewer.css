@@ -410,13 +410,18 @@
   margin: 0;
   accent-color: var(--accent);
 }
+.sv-timebar .tbtn,
+.sv-timebar .muted {
+  flex: none;
+}
 .sv-timebar .tbtn {
   height: 24px;
   padding: 0 7px;
 }
 .sv-timebar .tlabel {
-  min-width: 56px;
-  max-width: 110px;
+  flex: none;
+  min-width: 9ch;
+  max-width: 14ch;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
