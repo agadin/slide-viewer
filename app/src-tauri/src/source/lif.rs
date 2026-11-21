@@ -14,15 +14,22 @@
 //! 4 T, 10 mosaic tile). The element's `<Memory MemoryBlockID>` names its pixels. A sample's byte
 //! offset in the block is the sum of each index × its axis's `BytesInc`, plus the channel's
 //! `BytesInc`. Mosaics (TileScan) list `<Tile FieldX FieldY PosX PosY>` (stage position, metres)
-//! in an `<Attachment Name="TileScanInfo">`.
+//! in an `<Attachment Name="TileScanInfo">`. An image's `<TimeStampList>` holds one FILETIME
+//! (hex, 100 ns ticks) per frame (channel × every non-XY axis) in storage order.
 //!
 //! Display (as `zvi.rs`):
-//! - main image: the one with the largest displayed XY area (a mosaic counts its placed extent),
-//!   the first one in the XML on a tie; images whose pixels aren't in the file are skipped;
+//! - series: every image the reader can show (pixels in the file, a layout that fits its block,
+//!   not too large), each opened on its own (`open_series`) without reading the others' pixels.
+//!   Series 0 is the main image: the largest displayed XY area (a mosaic counts its placed
+//!   extent), the first one in the XML on a tie; the rest follow in file order. Each is named
+//!   by its element name, or by its path in the project ("Position 1/Cell 1") when the name
+//!   repeats;
 //! - pixel size: X/Y `Length` / (`NumberOfElements` − 1) (Length runs from the first to the last
 //!   pixel centre), converted to µm;
-//! - Z: focal planes with µm offsets from the Z length, the middle plane nominal; T: the first
-//!   time point; other axes: their first index;
+//! - Z: focal planes with µm offsets from the Z length, the middle plane nominal;
+//! - T: every time point (tile z = plane + t × `T_STRIDE`), timed from the TimeStampList (a time
+//!   point starts at its earliest frame), else evenly over the T `Length`, else unlabelled;
+//!   other axes: their first index;
 //! - channels: each stretched (0.1 % → 99.9 % percentiles of the nominal plane, black point at a
 //!   dark background) and summed in its `LUTName` colour; three 8-bit Red/Green/Blue channels are
 //!   a colour (brightfield) image and shown as is;
@@ -43,7 +50,7 @@ use super::cache::{cache_dir, file_key};
 use super::plain::{MAX_PIXELS, MAX_PLAUSIBLE_MPP, MEM_PIXELS};
 use super::pyramid::{Canvas, Pyramid};
 use super::zvi::{background_peak, percentile_range, stretch_lut};
-use super::{dz_max_level, dz_tile_rect, fit, make_planes, LevelInfo, SlideSource, SourceInfo, TILE_SIZE};
+use super::{dz_max_level, dz_tile_rect, fit, make_planes, make_time_points, split_z, LevelInfo, SlideSource, SourceInfo, TILE_SIZE};
 
 /// Planes whose pyramids stay in memory, by total bytes (older planes are dropped and rebuilt).
 const MEM_PLANE_BUDGET: u64 = 384 << 20;
@@ -59,8 +66,6 @@ const MAX_XML_UNITS: u32 = 256 << 20;
 const DIM_X: u32 = 1;
 const DIM_Y: u32 = 2;
 const DIM_Z: u32 = 3;
-/// T: only the first time point is shown, so no offset is ever added for it
-#[allow(dead_code)]
 const DIM_T: u32 = 4;
 const DIM_TILE: u32 = 10;
 
@@ -204,6 +209,9 @@ pub struct TileInfo {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct LifImage {
     pub name: String,
+    /// the element's place in the project: enclosing folder elements' names and its own, joined
+    /// by "/" (the project element itself left out)
+    pub path: String,
     pub dims: Vec<Dim>,
     pub channels: Vec<Chan>,
     pub memory_id: String,
@@ -212,6 +220,41 @@ pub struct LifImage {
     pub flip_x: bool,
     pub flip_y: bool,
     pub swap_xy: bool,
+    /// `<TimeStampList>`: one FILETIME (100 ns ticks) per frame, in storage order
+    pub stamps: Vec<u64>,
+}
+
+/// The text of every `<TimeStampList>` element, in document order (empty for `<TimeStampList/>`).
+fn timestamp_texts(xml: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while let Some(p) = xml[i..].find('<') {
+        let at = i + p;
+        let rest = &xml[at..];
+        if rest.starts_with("<!--") {
+            i = rest.find("-->").map(|q| at + q + 3).unwrap_or(xml.len());
+            continue;
+        }
+        i = at + 1;
+        let Some(after) = rest.strip_prefix("<TimeStampList") else { continue };
+        if !after.starts_with(|c: char| c.is_whitespace() || c == '>' || c == '/') {
+            continue;
+        }
+        let Some(gt) = after.find('>') else { break };
+        if after[..gt].trim_end().ends_with('/') {
+            out.push("");
+            continue;
+        }
+        let body = &after[gt + 1..];
+        let end = body.find("</TimeStampList").unwrap_or(body.len());
+        out.push(&body[..end]);
+    }
+    out
+}
+
+/// LAS X 2+ writes a `<TimeStampList>` as space-separated hex FILETIMEs.
+pub fn parse_stamps(text: &str) -> Vec<u64> {
+    text.split_whitespace().map_while(|t| u64::from_str_radix(t, 16).ok()).collect()
 }
 
 /// Every image the XML describes, in document order.
@@ -231,6 +274,8 @@ pub fn parse_images(xml: &str) -> Vec<LifImage> {
     };
     let mut by_owner: HashMap<usize, LifImage> = HashMap::new();
     let mut has_desc: Vec<usize> = Vec::new();
+    let texts = timestamp_texts(xml);
+    let mut n_lists = 0;
     for (i, e) in els.iter().enumerate() {
         let num = |k: &str| e.attr(k).and_then(|v| v.trim().parse::<f64>().ok());
         let int = |k: &str| e.attr(k).and_then(|v| v.trim().parse::<i64>().ok());
@@ -271,6 +316,22 @@ pub fn parse_images(xml: &str) -> Vec<LifImage> {
                 img.flip_y = flag("FlipY");
                 img.swap_xy = flag("SwapXY");
             }
+            "TimeStampList" => {
+                let text = texts.get(n_lists).copied().unwrap_or("");
+                n_lists += 1;
+                if !name_is(parent(i), "Image") {
+                    continue;
+                }
+                let Some(o) = owner(i) else { continue };
+                by_owner.entry(o).or_default().stamps = parse_stamps(text);
+            }
+            // LAS AF 1.x: <TimeStampList><TimeStamp HighInteger LowInteger/>…
+            "TimeStamp" if name_is(parent(i), "TimeStampList") && name_is(parent(i).and_then(parent), "Image") => {
+                let Some(o) = owner(i) else { continue };
+                if let (Some(hi), Some(lo)) = (int("HighInteger"), int("LowInteger")) {
+                    by_owner.entry(o).or_default().stamps.push(((hi as u64) << 32) | (lo as u64 & 0xFFFF_FFFF));
+                }
+            }
             "Tile" if name_is(parent(i), "Attachment") && els[parent(i).unwrap()].attr("Name") == Some("TileScanInfo") => {
                 let Some(o) = owner(i) else { continue };
                 let field = int("FieldX").zip(int("FieldY"));
@@ -284,6 +345,18 @@ pub fn parse_images(xml: &str) -> Vec<LifImage> {
     for o in has_desc {
         let Some(mut img) = by_owner.remove(&o) else { continue };
         img.name = els[o].attr("Name").unwrap_or("").to_string();
+        // enclosing elements, outermost first; the outermost one is the project itself
+        let mut chain = vec![img.name.clone()];
+        let mut a = owner(o);
+        while let Some(p) = a {
+            chain.push(els[p].attr("Name").unwrap_or("").to_string());
+            a = owner(p);
+        }
+        if chain.len() > 1 {
+            chain.pop();
+        }
+        chain.reverse();
+        img.path = chain.join("/");
         out.push(img);
     }
     out
@@ -339,11 +412,78 @@ impl LifImage {
         }
         Ok(b)
     }
-    /// Byte offset of sample (0, 0) of channel `c`, focal plane `z` and mosaic tile `m` (first
-    /// index of every other axis).
-    pub fn plane_offset(&self, c: usize, z: u64, m: u64) -> u64 {
+    /// Byte offset of sample (0, 0) of channel `c`, focal plane `z`, mosaic tile `m` and time
+    /// point `t` (first index of every other axis).
+    pub fn plane_offset(&self, c: usize, z: u64, m: u64, t: u64) -> u64 {
         let inc = |id: u32| self.dim(id).map(|d| d.inc).unwrap_or(0);
-        self.channels[c].inc + z * inc(DIM_Z) + m * inc(DIM_TILE)
+        self.channels[c].inc + z * inc(DIM_Z) + m * inc(DIM_TILE) + t * inc(DIM_T)
+    }
+    /// Seconds since the first time point, per time point: from the `<TimeStampList>` (one stamp
+    /// per frame in storage order; a time point starts at its earliest frame), else from the T
+    /// axis' `Length` (evenly spaced), else None.
+    pub fn time_seconds(&self) -> Vec<Option<f64>> {
+        let nt = self.size(DIM_T);
+        if nt <= 1 {
+            return vec![None; nt as usize];
+        }
+        if let Some(s) = self.stamp_times(nt) {
+            return s.into_iter().map(Some).collect();
+        }
+        let d = self.dim(DIM_T).unwrap();
+        let scale = match d.unit.as_str() {
+            "s" | "" => 1.0,
+            "ms" => 1e-3,
+            "min" => 60.0,
+            "h" => 3600.0,
+            _ => f64::NAN,
+        };
+        let step = d.length * scale / (nt - 1) as f64;
+        if step.is_finite() && step > 0.0 {
+            (0..nt).map(|t| Some(t as f64 * step)).collect()
+        } else {
+            vec![None; nt as usize]
+        }
+    }
+    fn stamp_times(&self, nt: u64) -> Option<Vec<f64>> {
+        let st = &self.stamps;
+        if st.is_empty() || self.channels.is_empty() {
+            return None;
+        }
+        // the t of each stamp: one stamp per time point, or one per frame (channel × every
+        // non-XY axis), frames in storage (byte offset) order
+        let ts: Vec<u64> = if st.len() as u64 == nt {
+            (0..nt).collect()
+        } else {
+            let axes: Vec<&Dim> = self.dims.iter().filter(|d| d.id != DIM_X && d.id != DIM_Y).collect();
+            let frames = axes.iter().try_fold(self.channels.len() as u64, |a, d| a.checked_mul(d.n))?;
+            if frames != st.len() as u64 {
+                return None;
+            }
+            let mut f: Vec<(u64, u64)> = Vec::with_capacity(frames as usize);
+            for k in 0..frames {
+                let (mut r, mut off, mut t) = (k, 0u64, 0u64);
+                for d in &axes {
+                    let i = r % d.n;
+                    r /= d.n;
+                    off += i * d.inc;
+                    if d.id == DIM_T {
+                        t = i;
+                    }
+                }
+                f.push((off + self.channels[r as usize].inc, t));
+            }
+            f.sort_by_key(|x| x.0);
+            f.into_iter().map(|x| x.1).collect()
+        };
+        let mut first = vec![u64::MAX; nt as usize];
+        for (&s, &t) in st.iter().zip(&ts) {
+            first[t as usize] = first[t as usize].min(s);
+        }
+        let t0 = first[0];
+        if first.iter().any(|&s| s == u64::MAX || s < t0) || first.iter().all(|&s| s == t0) {
+            return None;
+        }
+        Some(first.iter().map(|&s| (s - t0) as f64 * 1e-7).collect())
     }
     /// Bytes one XY plane spans from its first sample.
     pub fn plane_span(&self) -> Result<u64, String> {
@@ -363,7 +503,10 @@ impl LifImage {
         if self.width() > u32::MAX as u64 || self.height() > u32::MAX as u64 {
             return Err("image too large".into());
         }
-        let last = (0..self.channels.len()).map(|c| self.plane_offset(c, self.size(DIM_Z) - 1, self.size(DIM_TILE) - 1)).max().unwrap_or(0);
+        let last = (0..self.channels.len())
+            .map(|c| self.plane_offset(c, self.size(DIM_Z) - 1, self.size(DIM_TILE) - 1, self.size(DIM_T) - 1))
+            .max()
+            .unwrap_or(0);
         if last + self.plane_span()? > block_size {
             return Err(format!("pixel block too small ({block_size} bytes)"));
         }
@@ -464,13 +607,18 @@ pub struct LifSource {
     plane_pos: Vec<usize>,
     nominal: usize,
     luts: OnceLock<Vec<Vec<u8>>>,
+    /// time points (1 without a T axis)
+    nt: u64,
     planes: Mutex<PlaneCache>,
     build: Mutex<()>,
 }
 
+/// A rendered plane: (z position, time point).
+type PlaneKey = (usize, u64);
+
 #[derive(Default)]
 struct PlaneCache {
-    map: HashMap<usize, (Arc<Pyramid>, u64, u64)>,
+    map: HashMap<PlaneKey, (Arc<Pyramid>, u64, u64)>,
     clock: u64,
 }
 
@@ -495,61 +643,106 @@ fn extent(im: &LifImage) -> (u64, u64) {
     (w, h)
 }
 
-impl LifSource {
-    /// Image number `series` of the file (`SourceInfo::series`). TODO(series): only 0 so far.
-    pub fn open_series(path: &str, series: u32) -> Result<LifSource, String> {
-        if series != 0 {
-            return Err(format!("{path}: image {series} not found"));
+/// Images the reader can show: pixels present, a layout that fits the block, not too large.
+/// Returns them with their blocks, in file order, plus why the others were left out.
+fn usable_images(all: Vec<LifImage>, blocks: &HashMap<String, Block>) -> (Vec<(LifImage, Block)>, Vec<String>) {
+    let mut why = Vec::new();
+    let usable = all
+        .into_iter()
+        .filter_map(|im| {
+            let b = blocks.get(&im.memory_id).copied().filter(|b| b.size > 0);
+            let Some(b) = b else {
+                why.push(format!("{}: pixels not in the file", im.name));
+                return None;
+            };
+            if let Err(e) = im.validate(b.size) {
+                why.push(format!("{}: {e}", im.name));
+                return None;
+            }
+            let (w, h) = extent(&im);
+            if w * h > MAX_PIXELS || w > u32::MAX as u64 || h > u32::MAX as u64 {
+                why.push(format!("{}: image too large ({w} × {h})", im.name));
+                return None;
+            }
+            Some((im, b))
+        })
+        .collect();
+    (usable, why)
+}
+
+/// Series order: the main image (`pick_main`) first, then the others in file order. Indices into
+/// `imgs`.
+pub fn series_order(imgs: &[LifImage]) -> Vec<usize> {
+    let Some(main) = pick_main(imgs, &extent) else { return vec![] };
+    std::iter::once(main).chain((0..imgs.len()).filter(|&k| k != main)).collect()
+}
+
+/// What each image is called in the image list: its name when no other image has it, else its
+/// path in the project ("Position 1/Cell 1"), numbered if even that repeats.
+pub fn series_names(imgs: &[&LifImage]) -> Vec<String> {
+    let count = |f: &dyn Fn(&LifImage) -> &str, v: &str| imgs.iter().filter(|i| f(i) == v).count();
+    let mut out: Vec<String> = imgs
+        .iter()
+        .map(|i| {
+            if count(&|j| &j.name, &i.name) == 1 || i.path.is_empty() {
+                i.name.clone()
+            } else {
+                i.path.clone()
+            }
+        })
+        .collect();
+    let names = out.clone();
+    let mut seen: HashMap<String, usize> = HashMap::new();
+    for (k, n) in names.iter().enumerate() {
+        if names.iter().filter(|m| *m == n).count() > 1 {
+            let c = seen.entry(n.clone()).or_insert(0);
+            *c += 1;
+            out[k] = format!("{n} ({c})");
         }
-        Self::open(path)
+    }
+    out
+}
+
+impl LifSource {
+    /// Image number `series` of the file (`SourceInfo::series`, ordered by `series_order`).
+    pub fn open_series(path: &str, series: u32) -> Result<LifSource, String> {
+        Self::open_where(path, |_, _| Some(series as usize))
     }
 
     pub fn open(path: &str) -> Result<LifSource, String> {
-        LifSource::open_image(path, None)
+        Self::open_series(path, 0)
     }
 
-    /// Open the image named `name`, or the main image (`pick_main`) when None.
+    /// Open the image named `name` (its LIF element name), or the main image when None.
     pub fn open_image(path: &str, name: Option<&str>) -> Result<LifSource, String> {
+        match name {
+            None => Self::open_series(path, 0),
+            Some(n) => Self::open_where(path, |imgs, order| order.iter().position(|&k| imgs[k].name == n)),
+        }
+    }
+
+    /// Open the series `pick` chooses (given the usable images and the series order).
+    fn open_where(path: &str, pick: impl Fn(&[LifImage], &[usize]) -> Option<usize>) -> Result<LifSource, String> {
         let mut f = File::open(path).map_err(|e| format!("{path}: {e}"))?;
         let (xml, blocks) = read_container(&mut f).map_err(|e| format!("{path}: {e}"))?;
         let all = parse_images(&xml);
+        drop(xml);
         if all.is_empty() {
             return Err(format!("{path}: no images in this LIF file"));
         }
-        let mut why = Vec::new();
-        let usable: Vec<(LifImage, Block)> = all
-            .into_iter()
-            .filter_map(|im| {
-                let b = blocks.get(&im.memory_id).copied().filter(|b| b.size > 0);
-                let Some(b) = b else {
-                    why.push(format!("{}: pixels not in the file", im.name));
-                    return None;
-                };
-                match im.validate(b.size) {
-                    Ok(()) => Some((im, b)),
-                    Err(e) => {
-                        why.push(format!("{}: {e}", im.name));
-                        None
-                    }
-                }
-            })
-            .collect();
+        let (usable, why) = usable_images(all, &blocks);
         if usable.is_empty() {
             return Err(format!("{path}: no readable image in this LIF file ({})", why.join("; ")));
         }
         let imgs: Vec<LifImage> = usable.iter().map(|u| u.0.clone()).collect();
-        let k = match name {
-            Some(n) => imgs.iter().position(|i| i.name == n).ok_or_else(|| format!("{path}: no readable image named {n:?}"))?,
-            None => pick_main(&imgs, &extent).unwrap(),
-        };
-        let (img, block) = usable.into_iter().nth(k).unwrap();
+        let order = series_order(&imgs);
+        let series = pick(&imgs, &order).filter(|&s| s < order.len()).ok_or_else(|| format!("{path}: image not found"))?;
+        let names = if order.len() > 1 { series_names(&order.iter().map(|&k| &imgs[k]).collect::<Vec<_>>()) } else { vec![] };
+        let (img, block) = usable.into_iter().nth(order[series]).unwrap();
 
         let mpp = img.mpp();
         let tiles = layout_tiles(&img, mpp);
         let (width, height) = extent(&img);
-        if width * height > MAX_PIXELS || width > u32::MAX as u64 || height > u32::MAX as u64 {
-            return Err(format!("{path}: image too large ({width} × {height})"));
-        }
 
         // Z: slider order is ascending offset
         let nz = img.size(DIM_Z);
@@ -596,6 +789,10 @@ impl LifSource {
             info.calibrated = true;
         }
         info.z_planes = z_planes;
+        info.time_points = make_time_points(&img.time_seconds());
+        info.series = names;
+        info.series_index = series as u32;
+        info.series_kind = "Image".into();
         let lsizes = super::pyramid::level_sizes(width as u32, height as u32);
         info.levels = lsizes
             .iter()
@@ -604,6 +801,7 @@ impl LifSource {
             .map(|(k, l)| LevelInfo { width: l.0 as i64, height: l.1 as i64, downsample: (1u64 << k) as f64 })
             .collect();
         info.associated = vec!["thumbnail".into()];
+        let img_nt = img.size(DIM_T);
         Ok(LifSource {
             path: path.to_string(),
             info,
@@ -617,6 +815,7 @@ impl LifSource {
             zs,
             plane_pos,
             nominal,
+            nt: img_nt,
             luts: OnceLock::new(),
             planes: Mutex::new(PlaneCache::default()),
             build: Mutex::new(()),
@@ -633,12 +832,12 @@ impl LifSource {
         self.tiles.len()
     }
 
-    /// One XY plane of channel `c`, file z `z`, tile `m`, as u16 samples.
-    fn read_plane(&self, c: usize, z: u64, m: u64) -> Result<Vec<u16>, String> {
+    /// One XY plane of channel `c`, file z `z`, tile `m`, time point `t`, as u16 samples.
+    fn read_plane(&self, c: usize, z: u64, m: u64, t: u64) -> Result<Vec<u16>, String> {
         let img = &self.img;
         let bps = img.bytes_per_sample()?;
         let span = img.plane_span()?;
-        let off = self.block.offset + img.plane_offset(c, z, m);
+        let off = self.block.offset + img.plane_offset(c, z, m, t);
         let mut buf = vec![0u8; span as usize];
         {
             let mut f = self.file.lock().unwrap();
@@ -663,8 +862,9 @@ impl LifSource {
             }
             let mut hist = vec![0u64; n];
             let step = self.tiles.len().div_ceil(16).max(1);
+            // the first time point's nominal plane: one stretch for every plane and time point
             for t in self.tiles.iter().step_by(step) {
-                let s = self.read_plane(ch.k, self.zs[self.nominal], t.0)?;
+                let s = self.read_plane(ch.k, self.zs[self.nominal], t.0, 0)?;
                 let stride = (s.len() / 2_000_000).max(1);
                 for &v in s.iter().step_by(stride) {
                     hist[(v as usize).min(n - 1)] += 1;
@@ -680,13 +880,13 @@ impl LifSource {
         Ok(self.luts.get().unwrap())
     }
 
-    /// One mosaic tile of z position `zp` as RGB8.
-    fn render_tile(&self, zp: usize, m: u64) -> Result<Vec<u8>, String> {
+    /// One mosaic tile of z position `zp` at time point `t` as RGB8.
+    fn render_tile(&self, (zp, t): PlaneKey, m: u64) -> Result<Vec<u8>, String> {
         let luts = self.luts()?;
         let (w, h) = (self.img.width() as usize, self.img.height() as usize);
         let mut acc = vec![0u32; w * h * 3];
         for (ch, lut) in self.channels.iter().zip(luts) {
-            let s = self.read_plane(ch.k, self.zs[zp], m)?;
+            let s = self.read_plane(ch.k, self.zs[zp], m, t)?;
             let col = ch.color.map(|c| c as u32);
             for (o, &v) in acc.chunks_exact_mut(3).zip(&s) {
                 let l = lut[(v as usize).min(lut.len() - 1)] as u32;
@@ -698,12 +898,12 @@ impl LifSource {
         Ok(acc.into_iter().map(|v| (v / 255).min(255) as u8).collect())
     }
 
-    fn plane(&self, zp: usize) -> Result<Arc<Pyramid>, String> {
-        if let Some(p) = self.cached_plane(zp) {
+    fn plane(&self, key: PlaneKey) -> Result<Arc<Pyramid>, String> {
+        if let Some(p) = self.cached_plane(key) {
             return Ok(p);
         }
         let _g = self.build.lock().unwrap();
-        if let Some(p) = self.cached_plane(zp) {
+        if let Some(p) = self.cached_plane(key) {
             return Ok(p);
         }
         let (w, h) = (self.info.width as u32, self.info.height as u32);
@@ -711,7 +911,7 @@ impl LifSource {
         let bg = if self.rgb { 255 } else { 0 };
         let pyr = if big {
             let root = cache_dir("lif");
-            let dir = root.join(cache_key(&self.path)).join(format!("z{zp}"));
+            let dir = root.join(cache_key(&self.path)).join(format!("{}-z{}-t{}", self.img.memory_id, key.0, key.1));
             if let Some(p) = open_cached(&dir, w, h) {
                 p
             } else {
@@ -725,14 +925,14 @@ impl LifSource {
                         c.write_rect(0, y, w, 1, &row)?;
                     }
                 }
-                self.paint(zp, &mut c)?;
+                self.paint(key, &mut c)?;
                 let p = Pyramid::on_disk(c, &dir, MEM_PIXELS / 4)?;
                 std::fs::write(dir.join("complete"), format!("{w} {h}")).map_err(|e| e.to_string())?;
                 p
             }
         } else {
             let mut c = Canvas::Mem(RgbImage::from_pixel(w, h, image::Rgb([bg, bg, bg])));
-            self.paint(zp, &mut c)?;
+            self.paint(key, &mut c)?;
             let Canvas::Mem(img) = c else { unreachable!() };
             Pyramid::in_memory(img)?
         };
@@ -741,7 +941,7 @@ impl LifSource {
         let mut pc = self.planes.lock().unwrap();
         pc.clock += 1;
         let now = pc.clock;
-        pc.map.insert(zp, (pyr.clone(), bytes, now));
+        pc.map.insert(key, (pyr.clone(), bytes, now));
         while pc.map.len() > 1 && pc.map.values().map(|v| v.1).sum::<u64>() > MEM_PLANE_BUDGET {
             let oldest = *pc.map.iter().min_by_key(|(_, v)| v.2).unwrap().0;
             pc.map.remove(&oldest);
@@ -749,27 +949,29 @@ impl LifSource {
         Ok(pyr)
     }
 
-    fn cached_plane(&self, zp: usize) -> Option<Arc<Pyramid>> {
+    fn cached_plane(&self, key: PlaneKey) -> Option<Arc<Pyramid>> {
         let mut pc = self.planes.lock().unwrap();
         pc.clock += 1;
         let now = pc.clock;
-        pc.map.get_mut(&zp).map(|e| {
+        pc.map.get_mut(&key).map(|e| {
             e.2 = now;
             e.0.clone()
         })
     }
 
-    fn paint(&self, zp: usize, c: &mut Canvas) -> Result<(), String> {
+    fn paint(&self, key: PlaneKey, c: &mut Canvas) -> Result<(), String> {
         let (tw, th) = (self.img.width() as u32, self.img.height() as u32);
         for &(m, x, y) in &self.tiles {
-            let rgb = self.render_tile(zp, m)?;
+            let rgb = self.render_tile(key, m)?;
             c.write_rect(x, y, tw, th, &rgb)?;
         }
         Ok(())
     }
 
-    fn zpos(&self, z: u32) -> usize {
-        self.plane_pos.get(z as usize).copied().unwrap_or(self.nominal)
+    /// A tile z (plane + time point, `split_z`) → (z position, time point).
+    fn zpos(&self, z: u32) -> PlaneKey {
+        let (plane, t) = split_z(z);
+        (self.plane_pos.get(plane as usize).copied().unwrap_or(self.nominal), (t as u64).min(self.nt - 1))
     }
 
     fn fitted(&self, max_px: u32, z: u32) -> Result<RgbImage, String> {
@@ -933,10 +1135,15 @@ mod tests {
         assert!((mx - 0.5).abs() < 1e-9 && (my - 0.5).abs() < 1e-9, "{mx} {my}");
         assert!((m.step_um(DIM_Z).unwrap() + 1.0).abs() < 1e-9);
         assert_eq!(m.bytes_per_sample().unwrap(), 2);
-        assert_eq!(m.plane_offset(1, 2, 1), 262144 + 2 * 524288 + 2621440);
+        assert_eq!(m.plane_offset(1, 2, 1, 0), 262144 + 2 * 524288 + 2621440);
+        assert_eq!(m.plane_offset(1, 2, 1, 2), 262144 + 2 * 524288 + 2621440 + 2 * 5242880);
         assert_eq!(m.plane_span().unwrap(), 511 * 2 + 255 * 1024 + 2);
-        assert!(m.validate(5242880).is_ok());
-        assert!(m.validate(5242880 - 1).is_err());
+        // the last time point must fit too
+        assert!(m.validate(3 * 5242880).is_ok());
+        assert!(m.validate(3 * 5242880 - 1).is_err());
+        // no TimeStampList: evenly over the T length (9 s)
+        assert_eq!(m.time_seconds(), vec![Some(0.0), Some(4.5), Some(9.0)]);
+        assert_eq!(s.time_seconds(), vec![None]);
         assert_eq!(to_um(2.0, "mm"), 2000.0);
         assert_eq!(to_um(2.0, "nm"), 0.002);
         // stage positions: 0.9 µm apart at 0.5 µm/px → 2 px; FlipY doesn't move equal ys
@@ -961,6 +1168,102 @@ mod tests {
         }
         assert_eq!(decode_plane(&b[1..], 3, 2, 3, 10, 1), vec![0, 1, 2, 10, 11, 12]);
         assert_eq!(decode_plane(&[0x34, 0x12, 0xFF, 0x0F], 2, 1, 2, 4, 2), vec![0x1234, 0x0FFF]);
+    }
+
+    fn folder(name: &str, children: &str) -> String {
+        format!(r#"<Element Name="{name}" Visibility="1"><Data><Experiment Path="x"/></Data><Memory Size="0" MemoryBlockID="MemBlock_99"/><Children>{children}</Children></Element>"#)
+    }
+
+    #[test]
+    fn timestamps_paths_and_names() {
+        // T outermost: storage order c0 t0, c1 t0, c0 t1, c1 t1
+        let ts = r#"<TimeStampList NumberOfTimeStamps="4">0 989680 17d7840 18cba80 </TimeStampList><Attachment Name="x"><TimeStampList>ff</TimeStampList></Attachment>"#;
+        let a = element("t-outer", "MemBlock_2", 64, &[(1, 4, 0.0, 1), (2, 4, 0.0, 4), (4, 2, 99.0, 32)], &[("Red", 8, 0), ("Green", 8, 16)], ts);
+        // channel outermost: c0 t0, c0 t1, c1 t0, c1 t1
+        let ts = r#"<TimeStampList NumberOfTimeStamps="4">0 1c9c380 4c4b40 2160ec0</TimeStampList>"#;
+        let b = element("Cell 1", "MemBlock_3", 64, &[(1, 4, 0.0, 1), (2, 4, 0.0, 4), (4, 2, 0.0, 16)], &[("Red", 8, 0), ("Green", 8, 32)], ts);
+        // LAS AF 1.x stamps, one per time point; and an empty list
+        let ts = r#"<TimeStampList><TimeStamp HighInteger="1" LowInteger="0"/><TimeStamp HighInteger="1" LowInteger="20000000"/><TimeStamp HighInteger="1" LowInteger="70000000"/></TimeStampList>"#;
+        let c = element("Cell 1", "MemBlock_4", 48, &[(1, 4, 0.0, 1), (2, 4, 0.0, 4), (4, 3, 0.0, 16)], &[("Gray", 8, 0)], ts);
+        let d = element("still", "MemBlock_5", 16, &[(1, 4, 0.0, 1), (2, 4, 0.0, 4)], &[("Gray", 8, 0)], "<TimeStampList/>");
+        let xml = wrap(&(a + &folder("Position 1", &b) + &folder("Position 2", &(c + &d))));
+        assert_eq!(timestamp_texts(&xml).len(), 5);
+        let imgs = parse_images(&xml);
+        let paths: Vec<&str> = imgs.iter().map(|i| i.path.as_str()).collect();
+        assert_eq!(paths, ["t-outer", "Position 1/Cell 1", "Position 2/Cell 1", "Position 2/still"]);
+        assert_eq!(imgs[0].stamps, vec![0, 10_000_000, 25_000_000, 26_000_000], "the attachment's list is not the image's");
+        assert_eq!(imgs[0].time_seconds(), vec![Some(0.0), Some(2.5)], "stamps beat the T length");
+        assert_eq!(imgs[1].time_seconds(), vec![Some(0.0), Some(3.0)], "frames matched in storage order");
+        assert_eq!(imgs[2].time_seconds(), vec![Some(0.0), Some(2.0), Some(7.0)]);
+        assert!(imgs[3].stamps.is_empty());
+        // equal stamps say nothing: fall back to the length, here none → no times
+        let mut e = imgs[1].clone();
+        e.stamps = vec![5; 4];
+        assert_eq!(e.time_seconds(), vec![None, None]);
+        // names: unique names as is, repeated ones by their path
+        let refs: Vec<&LifImage> = imgs.iter().collect();
+        assert_eq!(series_names(&refs), ["t-outer", "Position 1/Cell 1", "Position 2/Cell 1", "still"]);
+        let same = [&imgs[1], &imgs[1]];
+        assert_eq!(series_names(&same), ["Position 1/Cell 1 (1)", "Position 1/Cell 1 (2)"]);
+        assert_eq!(parse_stamps("1d27ace506a6f90 zz 1"), vec![0x1d27ace506a6f90]);
+    }
+
+    /// Several images and a time series in one file: series order, names and time points.
+    #[test]
+    fn synthetic_series_and_time() {
+        let dir = std::env::temp_dir().join(format!("sv-lif-series-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // "small" 8 × 8 first in the file; "movie" 16 × 16 × 3 time points (dimmer with t) is the
+        // main image; "empty" has no pixels; "other" 8 × 8 in a folder
+        let small = vec![10u8; 64];
+        let mut movie = vec![0u8; 16 * 16 * 3];
+        for t in 0..3 {
+            for p in 0..256 {
+                movie[t * 256 + p] = if p % 16 < 8 { 200 - 80 * t as u8 } else { 0 };
+            }
+        }
+        let other = vec![200u8; 64];
+        let ts = r#"<TimeStampList NumberOfTimeStamps="3">0 5f5e100 bebc200</TimeStampList>"#;
+        let xml = wrap(
+            &(element("small", "MemBlock_2", 64, &[(1, 8, 0.0, 1), (2, 8, 0.0, 8)], &[("Gray", 8, 0)], "")
+                + &element("movie", "MemBlock_3", movie.len(), &[(1, 16, 0.0, 1), (2, 16, 0.0, 16), (4, 3, 20.0, 256)], &[("Gray", 8, 0)], ts)
+                + &element("empty", "MemBlock_4", 0, &[(1, 8, 0.0, 1), (2, 8, 0.0, 8)], &[("Gray", 8, 0)], "")
+                + &folder("F", &element("other", "MemBlock_5", 64, &[(1, 8, 0.0, 1), (2, 8, 0.0, 8)], &[("Gray", 8, 0)], ""))),
+        );
+        let lif = build_lif(&xml, &[("MemBlock_2", &small), ("MemBlock_3", &movie), ("MemBlock_4", &[]), ("MemBlock_5", &other)]);
+        let p = dir.join("s.lif");
+        std::fs::write(&p, &lif).unwrap();
+        let p = p.to_str().unwrap();
+
+        let s = LifSource::open_series(p, 0).unwrap();
+        let i = s.info();
+        assert_eq!(i.series, ["movie", "small", "other"], "main first, then file order; no pixels → not listed");
+        assert_eq!((i.series_index, i.series_kind.as_str(), i.width), (0, "Image", 16));
+        let secs: Vec<Option<f64>> = i.time_points.iter().map(|t| t.seconds).collect();
+        assert_eq!(secs, [Some(0.0), Some(10.0), Some(20.0)]);
+        assert_eq!(i.time_points[2].index, 2);
+        let max = dz_max_level(16, 16);
+        let px = |t: u32| s.tile(max, 0, 0, t * crate::source::T_STRIDE).unwrap().get_pixel(2, 2).0[0];
+        let (a, b, c) = (px(0), px(1), px(2));
+        assert!(a > b && b > c && c > 0, "dimmer with time, same stretch: {a} {b} {c}");
+        assert_eq!(s.tile(max, 0, 0, 0).unwrap().get_pixel(12, 2).0[0], 0);
+        assert_eq!(s.overview(16, 2 * crate::source::T_STRIDE).unwrap().get_pixel(2, 2).0[0], c, "overview follows t");
+        assert_eq!(px(9), c, "a t past the end shows the last time point");
+
+        let o = LifSource::open_series(p, 2).unwrap();
+        assert_eq!((o.summary().0.as_str(), o.info().series_index, o.info().width), ("other", 2, 8));
+        assert_eq!(o.info().series, i.series);
+        assert!(o.info().time_points.is_empty());
+        assert_eq!(o.tile(dz_max_level(8, 8), 0, 0, 0).unwrap().dimensions(), (8, 8));
+        assert!(LifSource::open_series(p, 3).is_err());
+        assert_eq!(LifSource::open_image(p, Some("small")).unwrap().info().series_index, 1);
+
+        // one readable image: no series list
+        let lif = build_lif(&wrap(&element("small", "MemBlock_2", 64, &[(1, 8, 0.0, 1), (2, 8, 0.0, 8)], &[("Gray", 8, 0)], "")), &[("MemBlock_2", &small)]);
+        let p2 = dir.join("one.lif");
+        std::fs::write(&p2, &lif).unwrap();
+        assert!(LifSource::open(p2.to_str().unwrap()).unwrap().info().series.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Two-channel, 3-plane z-stack plus a 2-tile mosaic in one file, opened end to end.
@@ -1065,6 +1368,28 @@ mod tests {
             let s = LifSource::open(&p).unwrap();
             let i = s.info();
             eprintln!("{name}: {:?} {} × {} mpp {:.4} z {:?}", s.summary(), i.width, i.height, i.mpp_x, i.z_planes.iter().map(|z| &z.label).collect::<Vec<_>>());
+            eprintln!("  series {:?}; times {:?}", i.series, i.time_points.iter().map(|t| &t.label).collect::<Vec<_>>());
+            let want_series: &[&str] = match name {
+                "Project007.lif" => &["Cell 1 Merged", "Cell 1 Dendrites zoom 1.5", "Cell 1 Dendrites zoom 2", "Cell 1"],
+                "20191025 Test FRET 585. 423, 426.lif" => {
+                    &["423_001", "423_002", "DonAcc_PreBleach", "Bleach003", "DonAcc_PostBleach", "FRET-Efficiency", "Series005", "Series006"]
+                }
+                _ => &[],
+            };
+            assert_eq!(i.series, want_series, "{name}");
+            assert_eq!(i.series_index, 0);
+            // every other image opens (as itself) and renders
+            for k in 1..i.series.len() as u32 {
+                let o = LifSource::open_series(&p, k).unwrap();
+                let oi = o.info();
+                eprintln!("  [{k}] {} {} × {} z {} c {} tiles {} t {:?}", o.summary().0, oi.width, oi.height, oi.z_planes.len(), o.channels.len(), o.tile_count(), oi.time_points.iter().map(|t| &t.label).collect::<Vec<_>>());
+                assert_eq!((o.summary().0.as_str(), oi.series_index), (i.series[k as usize].as_str(), k));
+                assert_eq!(oi.series, i.series);
+                let ov = o.overview(256, 0).unwrap();
+                let mean: f64 = ov.as_raw().iter().map(|&v| v as f64).sum::<f64>() / ov.as_raw().len() as f64;
+                assert!(mean > 1.0 && mean < 220.0, "{name} [{k}]: mean {mean}");
+            }
+            assert!(LifSource::open_series(&p, i.series.len().max(1) as u32).is_err());
             assert_eq!(s.summary().0, main, "{name}");
             assert_eq!((i.width, i.height, i.z_planes.len(), s.channels.len(), s.tile_count()), (w, h, nz, nc, nt), "{name}");
             assert!(i.calibrated && (i.mpp_x - mpp).abs() < 1e-3, "{name}: mpp {}", i.mpp_x);
@@ -1074,6 +1399,25 @@ mod tests {
             }
             let mean: f64 = o.as_raw().iter().map(|&v| v as f64).sum::<f64>() / o.as_raw().len() as f64;
             assert!(mean > 3.0 && mean < 200.0, "{name}: mean {mean}");
+        }
+        // PR2729: a 2 × 2 TileScan z-stack with 2 time points, 8.271 s apart by its TimeStampList
+        // (the T Length agrees). Both time points hold the same bytes in this test file, so they
+        // render alike; t = 1 reads the second half of the block (offset T BytesInc 98304).
+        if let Some(p) = sample("PR2729_frameOrderCombinedScanTypes.lif") {
+            let s = LifSource::open(&p).unwrap();
+            let t = &s.info().time_points;
+            assert_eq!(t.iter().map(|t| t.label.as_str()).collect::<Vec<_>>(), ["0 s", "8.27 s"]);
+            assert!((t[1].seconds.unwrap() - 8.271).abs() < 1e-6);
+            assert_eq!(s.img.plane_offset(0, 0, 0, 1), 98304);
+            let max = dz_max_level(97, 97);
+            for z in s.info().z_planes.iter().map(|z| z.index) {
+                let a = s.tile(max, 0, 0, z).unwrap();
+                let b = s.tile(max, 0, 0, z + crate::source::T_STRIDE).unwrap();
+                assert_eq!(a, b, "identical data at both time points");
+            }
+            if let Ok(d) = std::env::var("LIF_PNG_DIR") {
+                s.overview(1024, crate::source::T_STRIDE).unwrap().save(Path::new(&d).join("PR2729.t1.png")).unwrap();
+            }
         }
         // the 2 × 2 TileScan the "Cell 1 Merged" image was stitched from, placed by stage position:
         // the same neuron, about the same size (LAS X's stitching overlaps differ a few pixels)
