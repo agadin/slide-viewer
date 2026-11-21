@@ -29,8 +29,6 @@ tiff = "0.11"
 # fluorescence); it needs Rust 1.92 (rust-toolchain.toml)
 hayro-jpeg2000 = { version = "0.5", default-features = false, features = ["std", "simd"] }
 cfb = "0.14"
-# zlib-compressed Zeiss .zvi planes (MIT OR Apache-2.0; already built for Tauri)
-flate2 = "1"
 tauri-plugin-dialog = "2.8.4"
 
 

@@ -52,7 +52,6 @@ name = "app"
 version = "0.1.1"
 dependencies = [
  "cfb",
- "flate2",
  "hayro-jpeg2000",
  "image",
  "libloading 0.9.1",

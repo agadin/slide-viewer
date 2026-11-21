@@ -32,7 +32,7 @@ Slides are read with [OpenSlide](https://openslide.org) and, for Zeiss `.czi` fi
 ### Not supported
 
 - **Leica `.scn` slides with scan areas at different magnifications** (for example a 5× and a 40× area on one slide): OpenSlide can't combine them, and Slide Viewer doesn't yet. The app says so rather than showing one area and hiding the rest.
-- **Zeiss `.zvi` files with zlib-compressed planes** (rare; written by some AxioVision setups): no real file of this kind is publicly available to test with (none in OpenSlide's test data or on the OME image server), so this isn't verified. The app tries to read them following Bio-Formats' description of the layout. If one opens wrongly, convert it to OME-TIFF.
+- **Zeiss `.zvi` files with zlib-compressed planes** (rare; written by some AxioVision setups): no real file of this kind is publicly available to build and check a reader against (none in OpenSlide's test data or on the OME image server), so the app says they aren't supported. Convert them to OME-TIFF with QuPath or bfconvert.
 - **Confocal and microscope-camera formats: Leica `.lif`, Olympus `.oir`, Nikon `.nd2`**: these hold research stacks (many channels, time series), not scanned teaching slides, so they aren't read. Export a whole-slide TIFF or OME-TIFF instead.
 - **Other formats** (for example Bio-Formats-only ones): convert them to OME-TIFF with QuPath or bfconvert and open that.
 

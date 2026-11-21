@@ -284,23 +284,6 @@ pub fn parse_item_header(b: &[u8]) -> Result<ItemHeader, String> {
     Ok(ItemHeader { z, c, t, tile, width, height, pixels, valid_bits: valid, compression, data_offset })
 }
 
-/// A zlib-compressed plane (after its 8-byte "WZL" header, as Bio-Formats reads it): a zlib
-/// stream, or raw deflate when it has no zlib header. `need` is the plane's uncompressed size.
-pub fn inflate_plane(data: &[u8], need: usize) -> Result<Vec<u8>, String> {
-    use std::io::Read as _;
-    let mut out = Vec::with_capacity(need);
-    let zlib = flate2::read::ZlibDecoder::new(data).take(need as u64 + 1).read_to_end(&mut out);
-    if zlib.is_err() || out.len() < need {
-        out.clear();
-        flate2::read::DeflateDecoder::new(data).take(need as u64 + 1).read_to_end(&mut out).map_err(|e| format!("zlib plane: {e}"))?;
-    }
-    if out.len() < need {
-        return Err(format!("zlib plane is short ({} of {need} bytes)", out.len()));
-    }
-    out.truncate(need);
-    Ok(out)
-}
-
 // ---------------------------------------------------------------- display maths (pure)
 
 /// Low/high sample values at the given fractions of a histogram (hi > lo).
@@ -459,6 +442,9 @@ impl ZviSource {
         if raws.iter().any(|r| r.h.pixels.is_color() != pixels.is_color()) {
             return Err(format!("{path}: mixes colour and grey planes"));
         }
+        if let Some(r) = raws.iter().find(|r| r.h.compression == Compression::Zlib) {
+            return Err(format!("{path}: zlib-compressed ZVI planes are not supported ({})", r.path.display()));
+        }
 
         // calibration
         let num = |id: u32| tag(&image_tags, id).and_then(Val::as_f64);
@@ -609,10 +595,6 @@ impl ZviSource {
             }
             v
         };
-        if h.compression == Compression::Zlib {
-            let raw = inflate_plane(&bytes, n * h.pixels.bytes()).map_err(|e| format!("{}: {e}", it.path.display()))?;
-            return Ok(decode_raw(&raw, h.pixels, n));
-        }
         if h.compression == Compression::Jpeg {
             let img = image::load_from_memory_with_format(&bytes, image::ImageFormat::Jpeg).map_err(|e| format!("ZVI JPEG plane: {e}"))?;
             if img.width() != h.width || img.height() != h.height {
@@ -917,11 +899,6 @@ mod tests {
 
     /// An `Item(n)/Contents` stream (header + pixels) like the real files' layout.
     pub fn item_stream(z: i32, c: i32, tile: i32, w: u32, h: u32, bpp: u32, format: u32, pixels: &[u8]) -> Vec<u8> {
-        item_stream_valid(z, c, tile, w, h, bpp, format, if bpp == 1 || bpp == 3 { 8 } else { 16 }, pixels)
-    }
-
-    /// The same, with the header's valid-bits field (≤ 1 marks a compressed plane) and data as given.
-    pub fn item_stream_valid(z: i32, c: i32, tile: i32, w: u32, h: u32, bpp: u32, format: u32, valid: u32, pixels: &[u8]) -> Vec<u8> {
         let mut b = vt_i4(0x3000_1003);
         b.extend(vt_i4(0));
         b.extend([0, 0, 0, 0]); // two VT_EMPTY
@@ -944,7 +921,7 @@ mod tests {
             b.extend(9u16.to_le_bytes());
             b.extend([0; 16]);
         }
-        for v in [0x1000_2000u32, w, h, 1, bpp, format, valid] {
+        for v in [0x1000_2000u32, w, h, 1, bpp, format, if bpp == 1 || bpp == 3 { 8 } else { 16 }] {
             b.extend_from_slice(&v.to_le_bytes());
         }
         b.extend_from_slice(pixels);
@@ -1099,45 +1076,6 @@ mod tests {
         let dim = s.tile(max, 0, 0, 1).unwrap();
         assert!(dim.get_pixel(2, 2).0[2] < 200, "plane 1 is dimmer with the same stretch");
         assert_eq!(s.overview(20, 0).unwrap().dimensions(), (20, 15));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn zlib_planes_open() {
-        use std::io::Write;
-        // a gradient with a little noise, like real planes: compressible, but bigger than 1 KB packed
-        // (smaller streams aren't image data)
-        let (w, h) = (120u32, 90u32);
-        let px: Vec<u8> = (0..w * h).flat_map(|i| ((i % w) as u16 * 30 + (i / w) as u16 * 20 + (i * 37 % 11) as u16 + 50).to_le_bytes()).collect();
-        let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
-        z.write_all(&px).unwrap();
-        let mut packed = b"WZL\0\0\0\0\0".to_vec();
-        packed.extend(z.finish().unwrap());
-        assert!(packed.len() < px.len(), "really compressed");
-        let hdr = parse_item_header(&item_stream_valid(0, 0, 0, w, h, 2, 4, 0, &packed)).unwrap();
-        assert_eq!(hdr.compression, Compression::Zlib);
-        assert_eq!(inflate_plane(&packed[8..], px.len()).unwrap(), px);
-        // raw deflate (no zlib header) too, and short data is an error
-        let mut d = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
-        d.write_all(&px).unwrap();
-        assert_eq!(inflate_plane(&d.finish().unwrap(), px.len()).unwrap(), px);
-        assert!(inflate_plane(&packed[8..20], px.len()).is_err());
-        // a whole file: the zlib plane and an uncompressed copy decode to the same picture
-        let dir = std::env::temp_dir().join(format!("sv-zvi-zlib-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let mk = |name: &str, stream: Vec<u8>| {
-            let p = dir.join(name);
-            let mut cf = cfb::create(&p).unwrap();
-            cf.create_storage_all("/Image/Item(0)/Tags").unwrap();
-            cf.create_stream("/Image/Item(0)/Contents").unwrap().write_all(&stream).unwrap();
-            cf.flush().unwrap();
-            p
-        };
-        let zp = mk("z.zvi", item_stream_valid(0, 0, 0, w, h, 2, 4, 0, &packed));
-        let rp = mk("r.zvi", item_stream(0, 0, 0, w, h, 2, 4, &px));
-        let (zs, rs) = (ZviSource::open(zp.to_str().unwrap()).unwrap(), ZviSource::open(rp.to_str().unwrap()).unwrap());
-        let max = dz_max_level(w as i64, h as i64);
-        assert_eq!(zs.tile(max, 0, 0, 0).unwrap(), rs.tile(max, 0, 0, 0).unwrap());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
