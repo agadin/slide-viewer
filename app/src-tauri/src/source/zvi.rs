@@ -1079,9 +1079,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// a sample as `tools/fetch-format-samples.py` stores it (test-data/formats/Zeiss__<name>), or in a
+    /// Zeiss/ folder
     fn sample(name: &str) -> Option<String> {
-        let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test-data/formats/Zeiss").join(name);
-        p.exists().then(|| p.to_string_lossy().to_string())
+        let formats = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test-data/formats");
+        [formats.join(format!("Zeiss__{name}")), formats.join("Zeiss").join(name)]
+            .into_iter()
+            .find(|p| p.exists())
+            .map(|p| p.to_string_lossy().to_string())
     }
 
     /// Real files from the OpenSlide test data (see test-data/formats/Zeiss; not committed).

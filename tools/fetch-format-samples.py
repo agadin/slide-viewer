@@ -18,7 +18,13 @@ WANT = [
     "Hamamatsu-vms/CMU-1.zip",             # .vms (zip)
     "Zeiss/Zeiss-5-SlidePreview-JXR.czi",  # .czi
     "Zeiss/Zeiss-5-Flat.czi",              # .czi mosaic
-    "Olympus/OS-2.zip",                    # .vsi: NOT supported (phase 2), checks it fails gracefully
+    "Olympus/OS-1.zip",                    # .vsi, H&E (JPEG 2000 tiles in the _OS-1_ folder)
+    "Olympus/OS-2.zip",                    # .vsi, Ki-67
+    "Olympus/OS-3.zip",                    # .vsi, PTEN
+    "Zeiss/Zeiss-1-Merged.zvi",            # .zvi, 3 fluorescence channels
+    "Zeiss/Zeiss-2-Merged.zvi",            # .zvi
+    "Zeiss/Zeiss-1-Stacked.zvi",           # .zvi z-stack, 13 planes (113 MB)
+    "Zeiss/Zeiss-4-Mosaic.zvi",            # .zvi mosaic, 126 tiles (1.1 GB)
 ]
 idx = json.load(urllib.request.urlopen(BASE + "index.json"))
 os.makedirs(OUT, exist_ok=True)
