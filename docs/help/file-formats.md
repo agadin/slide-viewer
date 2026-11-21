@@ -22,11 +22,14 @@ Every file is shown the same way: zoom and pan, pins and rulers, adjustments. An
 | Sakura | `.svslide` | |
 | DICOM | `.dcm` (whole-slide) | Open any `.dcm` file of the series; the rest of the series must be in the same folder. |
 | Zeiss | `.czi` | Brightfield and fluorescence (channels are coloured with the settings saved in the file). Z-stacks show every plane: see [Focal planes](viewing.md#focal-planes). Several scenes in one file are shown together. |
+| Olympus | `.vsi` | cellSens and VS-series scanners. Open the `.vsi` file; its data folder `_name_` (holding `stack…` folders) must sit next to it. The low-magnification overview scan is used where the file has one. |
 | Ordinary pictures | `.jpg`, `.jpeg`, `.png`, `.bmp`, `.webp`, flat `.tif` | Photos, screenshots and stitched images. Very large flat TIFFs are prepared once and kept in the app's cache, so the next time they open at once. Usually [uncalibrated](measuring.md#uncalibrated-slides). |
 
 Slides are read with [OpenSlide](https://openslide.org) and, for Zeiss files, [libCZI](https://github.com/ZEISS/libczi). Both are built into the app. The label, macro and thumbnail pictures a scanner saves are used where the file has them.
 
-**Not yet supported:** Olympus `.vsi` and fluorescence Leica `.scn` files. Convert them to OME-TIFF (for example with QuPath or bfconvert) and open that.
+Olympus `.vsi` slides are read by the app itself. Brightfield slides show in colour; for a fluorescence `.vsi` only the first channel is shown, in grey.
+
+**Not yet supported:** fluorescence Leica `.scn` files. Convert them to OME-TIFF (for example with QuPath or bfconvert) and open that.
 
 ### Scale and measurements
 
