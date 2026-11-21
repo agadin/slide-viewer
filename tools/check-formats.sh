@@ -13,6 +13,7 @@ if [ $# -eq 0 ]; then
   files=()
   while IFS= read -r f; do files+=("$f"); done < <(find "$root/test-data/formats" -type f \
     \( -iname '*.svs' -o -iname '*.tif' -o -iname '*.tiff' -o -iname '*.ndpi' -o -iname '*.scn' -o -iname '*.mrxs' \
+       -o -iname '*.lif' \
        -o -iname '*.bif' -o -iname '*.vms' -o -iname '*.czi' -o -iname '*.zvi' -o -iname '*.avs' -o -iname '*.vsi' -o -iname '*.jpg' -o -iname '*.jpeg' \
        -o -iname '*.png' -o -iname '*.bmp' -o -iname '*.webp' -o -iname 'DCM_0.dcm' \) -not -path '*Hamamatsu-vms*/*.jpg' | sort)
   set -- "${files[@]}"
