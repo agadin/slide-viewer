@@ -84,4 +84,32 @@ for rel, sha, size in OME_FILES:
     if h.hexdigest() != sha:
         print(f"CHECKSUM MISMATCH CellSens/evident/{rel}", flush=True); os.remove(dest); continue
     print(f"ok CellSens/evident/{rel}", flush=True)
+
+# Olympus/Evident FluoView .oir confocal stacks from the OME sample image server (no published
+# checksums: these pin the files the reader was tested with). Licence: CC BY 4.0 (COPYING in each
+# folder). gh-4205/zenodo-*: (c) Nicolas Chiaruttini (and Lucie Dixsaut), zenodo.org/records/12773657
+# and /13680725; imagesc-105684: (c) Chin Hung, zenodo.org/records/14417737.
+OIR = "https://downloads.openmicroscopy.org/images/Olympus-OIR/"
+OIR_FILES = [
+    # 2 channels (LUT colours cyan/red), 53 focal planes, brain section (63 MB)
+    ("gh-4205/zenodo-13680725/tiling-sample-brain-section_A01_G001_0001.oir", "eb3ff7d8fa35daeb2b9d28c5ab84acdf2bc56f759ac6a57e90227321c9e1c63b", 62697450),
+    # 2 channels, 8 focal planes, 5 time points (52 MB)
+    ("imagesc-105684/1202-interval_30sec_sequence_frame_z stack.oir", "1f7e18de60233adf8e81128181cc2f4737713e052eb1b5b0573bf30c170a2d62", 51778648),
+    # spectral (lambda) scan: 5 wavelength bands × 4 focal planes (15 MB)
+    ("gh-4205/zenodo-12773657/DAPI_mCherry_4Z_5Lambda-420-630-w10nm-s50nm.oir", "73c4160baf79043f301fe470cfa3832aaf17d789f99ab35b9b736d4af2ace67d", 14595535),
+]
+for rel, sha, size in OIR_FILES:
+    dest = os.path.join(OUT, "Olympus-OIR", os.path.basename(rel))
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    if not (os.path.exists(dest) and os.path.getsize(dest) == size):
+        print(f"downloading Olympus-OIR/{rel} ({size/1e6:.0f} MB)", flush=True)
+        urllib.request.urlretrieve(OIR + urllib.parse.quote(rel), dest + ".part")
+        os.replace(dest + ".part", dest)
+    h = hashlib.sha256()
+    with open(dest, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    if h.hexdigest() != sha:
+        print(f"CHECKSUM MISMATCH Olympus-OIR/{rel}", flush=True); os.remove(dest); continue
+    print(f"ok Olympus-OIR/{rel}", flush=True)
 print("DONE", flush=True)

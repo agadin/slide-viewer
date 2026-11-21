@@ -9,6 +9,7 @@ pub mod scn;
 pub mod cache;
 pub mod czi;
 pub mod ndpi;
+pub mod oir;
 pub mod openslide;
 pub mod plain;
 pub mod pyramid;
@@ -52,7 +53,7 @@ pub struct ZPlane {
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceInfo {
-    /// backend that opened it: "openslide" | "plain" | "czi" | "bif" | "vsi" | "zvi"
+    /// backend that opened it: "openslide" | "plain" | "czi" | "bif" | "vsi" | "zvi" | "oir"
     pub format: String,
     /// scanner vendor when known ("hamamatsu", "aperio", "zeiss", …)
     pub vendor: Option<String>,
@@ -304,6 +305,8 @@ pub const SCN_EXTS: &[&str] = &[".scn"];
 /// Olympus cellSens / VS-series (pixels in the `_<name>_` folder next to the file).
 pub const VSI_EXTS: &[&str] = &[".vsi"];
 pub const ZVI_EXTS: &[&str] = &[".zvi"];
+/// Olympus FluoView confocal (FV3000/FV4000); a series continues in `name_00001`, … next to it.
+pub const OIR_EXTS: &[&str] = &[".oir"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Backend {
@@ -314,6 +317,7 @@ pub enum Backend {
     Scn,
     Vsi,
     Zvi,
+    Oir,
 }
 
 fn lower_name(path: &str) -> String {
@@ -334,6 +338,9 @@ pub fn backends_for(path: &str) -> Vec<Backend> {
     if has(ZVI_EXTS) {
         v.push(Backend::Zvi);
     }
+    if has(OIR_EXTS) {
+        v.push(Backend::Oir);
+    }
     if has(OPENSLIDE_EXTS) {
         v.push(Backend::OpenSlide);
     }
@@ -351,7 +358,7 @@ pub fn backends_for(path: &str) -> Vec<Backend> {
 
 /// Every extension the app opens (for the folder scan and file dialogs), lower-case with the dot.
 pub fn supported_extensions() -> Vec<String> {
-    let mut v: Vec<String> = OPENSLIDE_EXTS.iter().chain(PLAIN_EXTS).chain(CZI_EXTS).chain(VSI_EXTS).chain(ZVI_EXTS).map(|s| s.to_string()).collect();
+    let mut v: Vec<String> = OPENSLIDE_EXTS.iter().chain(PLAIN_EXTS).chain(CZI_EXTS).chain(VSI_EXTS).chain(ZVI_EXTS).chain(OIR_EXTS).map(|s| s.to_string()).collect();
     v.sort();
     v.dedup();
     v
@@ -377,6 +384,7 @@ pub fn open_source(path: &str) -> Result<Arc<dyn SlideSource>, String> {
             Backend::Scn => scn::ScnSource::open(path).map(|s| Arc::new(s) as Arc<dyn SlideSource>),
             Backend::Vsi => vsi::VsiSource::open(path).map(|s| Arc::new(s) as Arc<dyn SlideSource>),
             Backend::Zvi => zvi::ZviSource::open(path).map(|s| Arc::new(s) as Arc<dyn SlideSource>),
+            Backend::Oir => oir::OirSource::open(path).map(|s| Arc::new(s) as Arc<dyn SlideSource>),
         };
         match r {
             // every backend gets the shared tile LRU (cache.rs)
@@ -531,6 +539,8 @@ mod tests {
         assert_eq!(backends_for("/a/Argos-1.AVS"), vec![Backend::OpenSlide]);
         assert!(supported_extensions().contains(&".avs".to_string()));
         assert!(supported_extensions().contains(&".zvi".to_string()));
+        assert_eq!(backends_for("/a/Venus Stack.OIR"), vec![Backend::Oir]);
+        assert!(supported_extensions().contains(&".oir".to_string()));
         assert!(backends_for("x.ndpa").is_empty());
         assert_eq!(backends_for("/a/OS-2.VSI"), vec![Backend::Vsi]);
         assert!(supported_extensions().contains(&".vsi".to_string()));

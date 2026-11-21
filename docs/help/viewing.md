@@ -67,7 +67,7 @@ Sections aren't always scanned the way up you'd like. Rotating only turns your v
 
 ## Focal planes
 
-Some slides are scanned at several focus depths (a *z-stack*), so you can focus up and down through a thick section as you would with the fine-focus knob. Hamamatsu `.ndpi`, Zeiss `.czi` and `.zvi`, and Olympus `.vsi` z-stacks are supported. When the open slide has more than one plane, a slider appears on the right edge of the slide. Drag it, click ▲ / ▼, or press **Page Up** / **Page Down**. The slide opens at the in-focus plane (0 µm). The new plane fades in over the old one, so the view never goes blank. Pins and shapes belong to the slide, not to a plane, so they stay where they are.
+Some slides are scanned at several focus depths (a *z-stack*), so you can focus up and down through a thick section as you would with the fine-focus knob. Hamamatsu `.ndpi`, Zeiss `.czi` and `.zvi`, and Olympus `.vsi` and `.oir` z-stacks are supported. When the open slide has more than one plane, a slider appears on the right edge of the slide. Drag it, click ▲ / ▼, or press **Page Up** / **Page Down**. The slide opens at the in-focus plane (0 µm). The new plane fades in over the old one, so the view never goes blank. Pins and shapes belong to the slide, not to a plane, so they stay where they are.
 
 Slides with a single plane don't show the slider.
 
