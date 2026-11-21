@@ -4,6 +4,7 @@
 //! field names, the Deep-Zoom tile geometry and the registry's public methods are a CONTRACT
 //! (see CONTRACTS.md): lib.rs, scan.rs and the frontend rely on them. Add, don't rename.
 
+pub mod bif;
 pub mod cache;
 pub mod czi;
 pub mod ndpi;
@@ -48,7 +49,7 @@ pub struct ZPlane {
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceInfo {
-    /// backend that opened it: "openslide" | "plain" | "czi"
+    /// backend that opened it: "openslide" | "plain" | "czi" | "bif"
     pub format: String,
     /// scanner vendor when known ("hamamatsu", "aperio", "zeiss", …)
     pub vendor: Option<String>,
@@ -293,12 +294,15 @@ pub const OPENSLIDE_EXTS: &[&str] = &[".ndpi", ".svs", ".tif", ".tiff", ".scn", 
 /// Plain raster images (flat TIFFs are tried with OpenSlide first, then here).
 pub const PLAIN_EXTS: &[&str] = &[".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"];
 pub const CZI_EXTS: &[&str] = &[".czi"];
+/// Ventana BIF: OpenSlide first, then `bif.rs` for the DP 200 files OpenSlide rejects.
+pub const BIF_EXTS: &[&str] = &[".bif"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Backend {
     OpenSlide,
     Plain,
     Czi,
+    Bif,
 }
 
 fn lower_name(path: &str) -> String {
@@ -315,6 +319,9 @@ pub fn backends_for(path: &str) -> Vec<Backend> {
     }
     if has(OPENSLIDE_EXTS) {
         v.push(Backend::OpenSlide);
+    }
+    if has(BIF_EXTS) {
+        v.push(Backend::Bif);
     }
     if has(PLAIN_EXTS) {
         v.push(Backend::Plain);
@@ -346,6 +353,7 @@ pub fn open_source(path: &str) -> Result<Arc<dyn SlideSource>, String> {
             Backend::OpenSlide => openslide::OpenSlideSource::open(path).map(|s| Arc::new(s) as Arc<dyn SlideSource>),
             Backend::Plain => plain::PlainSource::open(path).map(|s| Arc::new(s) as Arc<dyn SlideSource>),
             Backend::Czi => czi::CziSource::open(path).map(|s| Arc::new(s) as Arc<dyn SlideSource>),
+            Backend::Bif => bif::BifSource::open(path).map(|s| Arc::new(s) as Arc<dyn SlideSource>),
         };
         match r {
             // every backend gets the shared tile LRU (cache.rs)
@@ -492,6 +500,7 @@ mod tests {
         assert_eq!(backends_for("/a/x.TIFF"), vec![Backend::OpenSlide, Backend::Plain]);
         assert_eq!(backends_for("x.png"), vec![Backend::Plain]);
         assert_eq!(backends_for("x.czi"), vec![Backend::Czi]);
+        assert_eq!(backends_for("/a/Ventana-1.BIF"), vec![Backend::OpenSlide, Backend::Bif]);
         assert!(backends_for("x.ndpa").is_empty());
         assert!(backends_for("x.vsi").is_empty());
         assert!(supported_extensions().contains(&".svs".to_string()));

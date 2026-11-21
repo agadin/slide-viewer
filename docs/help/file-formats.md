@@ -17,7 +17,7 @@ Every file is shown the same way: zoom and pan, pins and rulers, adjustments. An
 | Generic tiled TIFF | `.tif`, `.tiff` | Whole-slide TIFFs, including pyramidal and OME-TIFF files written by most scanners. |
 | Leica | `.scn` | |
 | 3DHISTECH MIRAX | `.mrxs` | Open the `.mrxs` file; its folder of data files must sit next to it with the same name. |
-| Ventana / Roche | `.bif` | |
+| Ventana / Roche | `.bif` | Older iScan scans and VENTANA DP 200 scans (which OpenSlide can't read; Slide Viewer stitches their tiles itself). |
 | Philips | `.tiff` | |
 | Sakura | `.svslide` | |
 | DICOM | `.dcm` (whole-slide) | Open any `.dcm` file of the series; the rest of the series must be in the same folder. |
