@@ -83,6 +83,7 @@ export function TimeBar() {
             max={times.length - 1}
             step={1}
             value={pos}
+            style={{ "--fill": `${(pos / (times.length - 1)) * 100}%` } as React.CSSProperties}
             onChange={(e) => setView({ t: times[Number(e.target.value)].index, playing: false })}
             title="Time point"
             aria-label="Time point"

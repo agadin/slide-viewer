@@ -21,7 +21,7 @@ ln -s "$SLIDE" "$SCRATCH/slides/$(basename "$SLIDE")"
 if [ -n "$NDPA" ]; then cp "$NDPA" "$SCRATCH/slides/$(basename "$SLIDE").ndpa"; fi
 # more slides for the browser list (README screenshots): SMOKE_EXTRA="/a/x.ndpi:/b/y.svs"
 IFS=':' read -r -a EXTRA <<< "${SMOKE_EXTRA:-}"
-for x in "${EXTRA[@]}"; do [ -n "$x" ] && ln -s "$x" "$SCRATCH/slides/$(basename "$x")"; done
+for x in ${EXTRA[@]+"${EXTRA[@]}"}; do [ -n "$x" ] && ln -s "$x" "$SCRATCH/slides/$(basename "$x")"; done
 DIR="$SCRATCH/slides"
 REPORT="$DIR/smoke-report.json"
 

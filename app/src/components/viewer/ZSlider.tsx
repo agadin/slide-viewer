@@ -28,6 +28,7 @@ export function ZSlider() {
         max={planes.length - 1}
         step={1}
         value={pos}
+        style={{ "--fill": `${(1 - pos / (planes.length - 1)) * 100}%` } as React.CSSProperties /* vertical, top = last plane: the track paints from the top */}
         onChange={(e) => setView({ z: planes[Number(e.target.value)].index })}
         title="Focal plane"
         aria-label="Focal plane"
