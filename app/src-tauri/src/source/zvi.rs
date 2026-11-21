@@ -34,6 +34,8 @@ use super::{dz_max_level, dz_tile_rect, fit, make_planes, LevelInfo, SlideSource
 
 /// Planes whose pyramids stay in memory, by total bytes (older planes are dropped and rebuilt).
 const MEM_PLANE_BUDGET: u64 = 384 << 20;
+/// Bump when the rendering (stretch, colours, layout) changes, so cached mosaics are rebuilt.
+const RENDER_VERSION: u32 = 1;
 /// Disk pyramids kept in the cache (oldest are removed).
 const KEEP_DISK: usize = 6;
 /// Percentiles of the grey stretch.
@@ -303,6 +305,28 @@ pub fn percentile_range(hist: &[u64], lo: f64, hi: f64) -> (u32, u32) {
     };
     let (l, h) = (find(lo), find(hi));
     if h > l { (l, h) } else { (l, l + 1) }
+}
+
+/// The background level of a fluorescence channel: the histogram's peak (in 256 buckets
+/// between `lo` and `hi`) when it lies in the darker half of that range, i.e. the background is
+/// dark. None for bright-background (brightfield) channels.
+pub fn background_peak(hist: &[u64], lo: u32, hi: u32) -> Option<u32> {
+    let total: u64 = hist.iter().sum();
+    if total == 0 || hi <= lo {
+        return None;
+    }
+    let width = ((hi - lo) as usize).div_ceil(256).max(1);
+    let mut best = (0u64, lo as usize);
+    let mut start = lo as usize;
+    while start < hi as usize {
+        let n: u64 = hist[start..(start + width).min(hi as usize)].iter().sum();
+        if n > best.0 {
+            best = (n, start);
+        }
+        start += width;
+    }
+    let peak = (best.1 + width / 2) as u32;
+    (peak < lo + (hi - lo) / 2).then_some(peak)
 }
 
 /// Sample value → 0..255 for a (lo, hi) stretch.
@@ -585,7 +609,7 @@ impl ZviSource {
         Ok(decode_raw(&bytes, h.pixels, n))
     }
 
-    /// The stretch of each channel, from the nominal plane (sampling at most 64 tiles).
+    /// The stretch of each channel, from the nominal plane (sampling at most 16 tiles).
     fn luts(&self) -> Result<&Vec<Vec<u8>>, String> {
         if let Some(l) = self.luts.get() {
             return Ok(l);
@@ -600,7 +624,7 @@ impl ZviSource {
                 continue;
             }
             let mut hist = vec![0u64; n];
-            let step = self.tiles.len().div_ceil(64).max(1);
+            let step = self.tiles.len().div_ceil(16).max(1);
             for tp in self.tiles.iter().step_by(step) {
                 let Some(it) = self.items.get(&(self.nominal, ch.c, tp.tile)) else { continue };
                 let s = self.read_item(it)?;
@@ -609,7 +633,11 @@ impl ZviSource {
                     hist[(v as usize).min(n - 1)] += 1;
                 }
             }
-            let (lo, hi) = percentile_range(&hist, STRETCH_LO, STRETCH_HI);
+            let (mut lo, hi) = percentile_range(&hist, STRETCH_LO, STRETCH_HI);
+            // fluorescence: the dark background is black, not dim grey/green
+            if let Some(bg) = background_peak(&hist, lo, hi) {
+                lo = lo.max(bg).min(hi - 1);
+            }
             out.push(stretch_lut(lo, hi, n));
         }
         let _ = self.luts.set(out);
@@ -659,7 +687,7 @@ impl ZviSource {
         let bg = if self.pixels.is_color() { 255 } else { 0 };
         let pyr = if big {
             let root = cache_dir("zvi");
-            let dir = root.join(file_key(&self.path)).join(format!("z{zp}"));
+            let dir = root.join(cache_key(&self.path)).join(format!("z{zp}"));
             if let Some(p) = open_cached(&dir, w, h) {
                 p
             } else {
@@ -796,6 +824,11 @@ fn read_stream(cf: &mut cfb::CompoundFile<File>, p: &Path, max: usize) -> Result
     Ok(v)
 }
 
+/// The disk-pyramid folder of a file: changes with the file and with `RENDER_VERSION`.
+fn cache_key(path: &str) -> String {
+    format!("{}-r{RENDER_VERSION}", file_key(path))
+}
+
 fn open_cached(dir: &Path, w: u32, h: u32) -> Option<Pyramid> {
     let meta = std::fs::read_to_string(dir.join("complete")).ok()?;
     if meta.trim() != format!("{w} {h}") {
@@ -808,7 +841,7 @@ fn open_cached(dir: &Path, w: u32, h: u32) -> Option<Pyramid> {
 
 /// Keep the most recently used files' disk pyramids (never the one being opened).
 fn prune(root: &Path, path: &str) {
-    let keep = file_key(path);
+    let keep = cache_key(path);
     let Ok(rd) = std::fs::read_dir(root) else { return };
     let mut dirs: Vec<(std::time::SystemTime, PathBuf)> = rd
         .flatten()
@@ -963,6 +996,12 @@ mod tests {
             h
         };
         assert_eq!(percentile_range(&flat, 0.001, 0.999), (50, 51));
+        // dark background peak at 100 → black point; a bright (brightfield) peak is left alone
+        assert_eq!(background_peak(&hist, 0, 256), Some(100));
+        let mut bright = vec![0u64; 256];
+        bright[20] = 10;
+        bright[240] = 50;
+        assert_eq!(background_peak(&bright, 20, 241), None);
         let lut = stretch_lut(100, 200, 256);
         assert_eq!((lut[0], lut[100], lut[150], lut[200], lut[255]), (0, 0, 128, 255, 255));
         assert_eq!(colorref(255), Some([255, 0, 0]));
@@ -1073,5 +1112,37 @@ mod tests {
             let mean: f64 = o.as_raw().iter().map(|&v| v as f64).sum::<f64>() / o.as_raw().len() as f64;
             assert!(mean > 5.0 && mean < 160.0, "{name}: mean {mean}");
         }
+    }
+
+    /// The 1.1 GB mosaic (9 × 14 tiles, 3 channels): stage positions → an 11382 × 13208 image
+    /// built as a disk pyramid. `ZVI_PNG_DIR` also saves the overview and a full-resolution
+    /// region across a tile corner.
+    #[test]
+    #[ignore]
+    fn real_zvi_mosaic() {
+        let Some(p) = sample("Zeiss-4-Mosaic.zvi") else {
+            eprintln!("skip: not downloaded");
+            return;
+        };
+        let t0 = std::time::Instant::now();
+        let s = ZviSource::open(&p).unwrap();
+        let i = s.info();
+        eprintln!("open {:?}: {} × {}, {} tiles, {:?}", t0.elapsed(), i.width, i.height, s.tiles.len(), s.channel_summary());
+        assert_eq!((i.width, i.height), (11382, 13208));
+        assert_eq!(s.tiles.len(), 126);
+        assert!((i.mpp_x - 0.3225).abs() < 1e-9);
+        let o = s.overview(1024, 0).unwrap();
+        eprintln!("first plane {:?}", t0.elapsed());
+        // tile (5, 6) starts at about (6245, 5616), in tissue; this region straddles that corner
+        let r = s.region(6045, 5416, 400, 400, 400, 400, 0).unwrap();
+        if let Ok(d) = std::env::var("ZVI_PNG_DIR") {
+            o.save(Path::new(&d).join("Zeiss-4-Mosaic.zvi.png")).unwrap();
+            r.save(Path::new(&d).join("Zeiss-4-Mosaic.corner.png")).unwrap();
+        }
+        let t1 = std::time::Instant::now();
+        drop(s);
+        let again = ZviSource::open(&p).unwrap();
+        assert_eq!(again.overview(1024, 0).unwrap(), o);
+        eprintln!("reopen from the disk cache {:?}", t1.elapsed());
     }
 }
