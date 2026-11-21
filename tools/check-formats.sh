@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Open every sample slide with the app's own backends (the `smoke` example) and print a table.
-#   tools/fetch-format-samples.py test-data/formats   # once: ~1.5 GB of OpenSlide/Zeiss samples (checksummed)
+#   tools/fetch-format-samples.py test-data/formats   # once: ~7 GB of OpenSlide/Zeiss samples (checksummed)
 #   tools/check-formats.sh                            # all files under test-data/formats
 #   tools/check-formats.sh <file>...                  # or just these
+# To look at one by eye (overview, a full-resolution tissue region, browser thumbnail, label/macro):
+#   cd app/src-tauri && cargo run --release --example inspect -- <file> /tmp/inspect
 set -u
 root="$(cd "$(dirname "$0")/.." && pwd)"
 smoke="$root/app/src-tauri/target/release/examples/smoke"

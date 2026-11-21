@@ -7,10 +7,13 @@ WANT = [
     "Aperio/JP2K-33003-1.svs",             # .svs (JPEG 2000)
     "Generic-TIFF/CMU-1.tiff",             # tiled TIFF
     "Huron/Huron-1.tif",                   # .tif
-    "Leica/Leica-Fluorescence-1.scn",      # .scn
+    "Leica/Leica-Fluorescence-1.scn",      # .scn (fluorescence)
+    "Leica/Leica-1.scn",                   # .scn brightfield, one ROI (292 MB)
+    "Leica/Leica-2.scn",                   # .scn brightfield, several ROIs in one bounding box (2.3 GB)
     "Mirax/CMU-1-Saved-1_16.zip",          # .mrxs (zip: .mrxs + data folder)
     "Philips-TIFF/Philips-4.tiff",         # Philips .tiff
-    "Ventana/Ventana-1.bif",               # .bif
+    "Ventana/Ventana-1.bif",               # .bif (DP 200)
+    "Ventana/OS-2.bif",                    # .bif from an older iScan, joint direction RIGHT (2.7 GB)
     "DICOM/JP2K-33003-1.zip",              # .dcm (zip of DICOM files)
     "Hamamatsu-vms/CMU-1.zip",             # .vms (zip)
     "Zeiss/Zeiss-5-SlidePreview-JXR.czi",  # .czi
@@ -22,6 +25,8 @@ os.makedirs(OUT, exist_ok=True)
 for key in WANT:
     meta = idx[key]
     dest = os.path.join(OUT, key.replace("/", "__"))
+    if dest.endswith(".zip") and os.path.isdir(dest[:-4]):
+        print(f"ok {key} (already unpacked)", flush=True); continue
     if not (os.path.exists(dest) and os.path.getsize(dest) == meta["size"]):
         print(f"downloading {key} ({meta['size']/1e6:.0f} MB)", flush=True)
         urllib.request.urlretrieve(BASE + key, dest + ".part")
