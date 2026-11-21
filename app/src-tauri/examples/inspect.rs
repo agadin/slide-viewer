@@ -4,11 +4,34 @@
 //! full-resolution 1024 px region centred on the most tissue-dense part of the overview, so it is
 //! not blank background; the brightest part on a dark fluorescence image), <name>-thumb.png (what
 //! the folder browser shows) and <name>-assoc-<name>.png per associated image, and prints the
-//! backend's info.
+//! backend's info. `SERIES=n` opens image n of a multi-image file and `T=n` shows time point n
+//! (the names get `-s<n>` / `-t<n>`).
 use std::path::Path;
 
 use app_lib::scan::render_thumbnail;
 use app_lib::source::{encode_png, open_source};
+
+/// `SERIES=n`: image n of a multi-image file (`SourceInfo::series`); default 0.
+fn series() -> u32 {
+    std::env::var("SERIES").ok().and_then(|v| v.parse().ok()).unwrap_or(0)
+}
+
+/// `T=n`: time point n of a time series, as the tile z carries it (`split_z`); default 0.
+fn tz() -> u32 {
+    std::env::var("T").ok().and_then(|v| v.parse::<u32>().ok()).unwrap_or(0) * app_lib::source::T_STRIDE
+}
+
+/// The output name: the file name, plus `-s<n>` / `-t<n>` when `SERIES` / `T` pick another one.
+fn out_name(path: &str) -> String {
+    let mut name = Path::new(path).file_name().unwrap().to_string_lossy().to_string();
+    if series() > 0 {
+        name += &format!("-s{}", series());
+    }
+    if tz() > 0 {
+        name += &format!("-t{}", tz() / app_lib::source::T_STRIDE);
+    }
+    name
+}
 
 fn save(dir: &Path, name: &str, what: &str, img: &image::RgbImage) -> Result<(), String> {
     let p = dir.join(format!("{name}-{what}.png"));
@@ -18,11 +41,11 @@ fn save(dir: &Path, name: &str, what: &str, img: &image::RgbImage) -> Result<(),
 }
 
 fn run(path: &str, out: &Path) -> Result<(), String> {
-    let src = open_source(path, 0)?;
+    let src = open_source(path, series())?;
     let info = src.info().clone();
     println!("{path}: {}", serde_json::to_string(&info).map_err(|e| e.to_string())?);
-    let name = Path::new(path).file_name().unwrap().to_string_lossy().to_string();
-    let o = src.overview(1024, 0)?;
+    let name = out_name(path);
+    let o = src.overview(1024, tz())?;
     save(out, &name, "overview", &o)?;
     // densest tissue: the darkest 16x16 block of the overview (stain on a white background), or the
     // brightest one when the background is dark (fluorescence)
@@ -52,7 +75,7 @@ fn run(path: &str, out: &Path) -> Result<(), String> {
     let side = 1024i64.min(info.width).min(info.height);
     let (x0, y0) = ((cx - side / 2).clamp(0, info.width - side), (cy - side / 2).clamp(0, info.height - side));
     println!("  tissue region at level-0 ({x0}, {y0}) size {side}");
-    let t = src.region(x0, y0, side, side, side as u32, side as u32, 0)?;
+    let t = src.region(x0, y0, side, side, side as u32, side as u32, tz())?;
     save(out, &name, "tissue", &t)?;
     save(out, &name, "thumb", &render_thumbnail(&*src, 256)?)?;
     for a in &info.associated {
@@ -66,10 +89,10 @@ fn run(path: &str, out: &Path) -> Result<(), String> {
 
 /// `<name>-region-x-y-w-h.png`: level-0 rectangle (x, y, w, h) scaled to fit 1024 px.
 fn region(path: &str, out: &Path, r: &[i64]) -> Result<(), String> {
-    let src = open_source(path, 0)?;
+    let src = open_source(path, series())?;
     let (ow, oh) = app_lib::source::fit(r[2], r[3], 1024);
-    let img = src.region(r[0], r[1], r[2], r[3], ow, oh, 0)?;
-    let name = Path::new(path).file_name().unwrap().to_string_lossy().to_string();
+    let img = src.region(r[0], r[1], r[2], r[3], ow, oh, tz())?;
+    let name = out_name(path);
     save(out, &name, &format!("region-{}-{}-{}-{}", r[0], r[1], r[2], r[3]), &img)
 }
 
