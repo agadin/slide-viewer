@@ -23,7 +23,7 @@ UI style and behaviour, but **never modify it**.
 | Existing `.ndpa` | Load all, allow editing, and **preserve everything we don't understand** when writing back |
 | Save location | `<slide file name>.ndpa` next to the slide (e.g. `VMS104.ndpi.ndpa`), autosaved. If that folder is read-only, fall back to the app data dir. Also offer "Export .ndpa…" |
 | Folder browsing | Pick a parent folder → recursive scan → collapsible sidebar tree mirroring subfolders, a thumbnail per slide, name search, remember the last folder, and a badge on slides that have annotations |
-| Formats | OpenSlide formats (.ndpi .svs .tif/.tiff .scn .mrxs .vms .vmu .bif .svslide, DICOM WSI) + plain images (.jpg .jpeg .png .bmp .webp, flat TIFF) + **.czi via libCZI** (now). **.vsi is phase 2** (not in v1) |
+| Formats | OpenSlide formats (.ndpi .svs .tif/.tiff .scn .mrxs .vms .vmu .bif .svslide, DICOM WSI) + plain images (.jpg .jpeg .png .bmp .webp, flat TIFF) + **.czi via libCZI** (now). Added in 0.1.1: Olympus .vsi, VENTANA DP 200 .bif, Zeiss .zvi (own readers). Since: Argos .avs (OpenSlide), fluorescence .vsi/.scn (own readers). Not supported: Leica .scn with scan areas at different magnifications; confocal .lif/.oir/.nd2 (see docs/help/file-formats.md) |
 | Filters | Gamma, brightness, contrast, saturation, hue, grayscale, invert, sharpen/unsharp mask, stain separation (H&E, H-DAB) |
 | Stain auto | Auto stain-vector estimation (Macenko), stain-type detection (H&E vs H-DAB/IHC vs special stains such as PAS, trichrome, silver) with an automatic preset, colour normalisation to a reference H&E, auto levels/gamma from the tissue histogram (ignoring the background). Every one is a one-click "Auto", and there is a preference to apply automatically when a slide opens |
 | Extras in v1 | Overview map + scale bar + zoom presets, annotation list panel, PNG snapshot export, view rotation, focal planes (z-stack) where the format has them |
@@ -165,4 +165,4 @@ needed (`npx tauri signer generate -w ~/.tauri/slide-viewer.key`). The user does
 
 ## Out of scope for v1
 
-.vsi (Olympus), cloud or LMS submission, multi-user features, AI tissue segmentation.
+Cloud or LMS submission, multi-user features, AI tissue segmentation.

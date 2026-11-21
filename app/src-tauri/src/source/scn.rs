@@ -63,6 +63,8 @@ pub struct ScnImage {
     pub levels: Vec<ScnLevel>,
     /// fluorescence channels; empty for a colour (brightfield) image
     pub channels: Vec<ScnChannel>,
+    /// its `<view>` on the slide: (width, height) in nm
+    pub view: Option<(f64, f64)>,
 }
 
 impl ScnImage {
@@ -101,7 +103,7 @@ pub fn parse_scn_xml(xml: &str) -> Result<Vec<ScnImage>, String> {
         match out.iter().position(|(k, _)| *k == img) {
             Some(p) => p,
             None => {
-                out.push((img, ScnImage { w: 0, h: 0, nm_per_px: None, levels: vec![], channels: vec![] }));
+                out.push((img, ScnImage { w: 0, h: 0, nm_per_px: None, levels: vec![], channels: vec![], view: None }));
                 out.len() - 1
             }
         }
@@ -133,6 +135,8 @@ pub fn parse_scn_xml(xml: &str) -> Result<Vec<ScnImage>, String> {
             "view" => {
                 if let Ok(w) = e.num("sizeX") {
                     view_w.insert(img, w);
+                    let p = get(img, &mut out);
+                    out[p].1.view = e.num("sizeY").ok().map(|h| (w, h));
                 }
             }
             "channel" => {
@@ -162,6 +166,18 @@ pub fn parse_scn_xml(xml: &str) -> Result<Vec<ScnImage>, String> {
         return Err("SCN description has no images".into());
     }
     Ok(images)
+}
+
+/// Images that show part of the glass (scan areas), not a picture of the whole slide: their view is
+/// clearly smaller than the largest view in the file.
+pub fn scan_areas(images: &[ScnImage]) -> Vec<usize> {
+    let biggest = images.iter().filter_map(|i| i.view).fold((0.0f64, 0.0f64), |a, v| (a.0.max(v.0), a.1.max(v.1)));
+    (0..images.len())
+        .filter(|k| match images[*k].view {
+            Some((w, h)) => w < 0.9 * biggest.0 || h < 0.9 * biggest.1,
+            None => true,
+        })
+        .collect()
 }
 
 /// The main image (the finest; the most pixels on a tie) and the macro (the coarsest colour image
@@ -370,6 +386,12 @@ impl ScnSource {
         let tiff = Arc::new(Tiff::open(path)?);
         let xml = tiff.text(0, TAG_DESCRIPTION).ok_or("not a Leica SCN file (no description)")?;
         let images = parse_scn_xml(&xml)?;
+        // several scan areas (OpenSlide refuses these when their magnifications differ): showing one
+        // of them would quietly hide the others, so say so instead
+        let areas = scan_areas(&images);
+        if areas.len() > 1 {
+            return Err(format!("unsupported: this Leica slide has {} scan areas at different magnifications, which can't be shown together yet", areas.len()));
+        }
         let (mi, macro_i) = pick_images(&images);
         let im = &images[mi];
         let main = Reader::new(tiff.clone(), im, TILE_CACHE_BYTES)?;
@@ -451,6 +473,13 @@ mod tests {
         assert!(m.fluorescence() && !imgs[0].fluorescence() && imgs[1].fluorescence());
         // main: the finest; macro: the brightfield picture of the glass (not the fluorescence one)
         assert_eq!(pick_images(&imgs), (2, Some(0)));
+        assert_eq!(scan_areas(&imgs), vec![2], "one scan area; the other two show the whole glass");
+        // several areas at different magnifications are refused, not shown one at a time
+        let mut two = imgs.clone();
+        let mut extra = imgs[2].clone();
+        extra.nm_per_px = Some(2000.0);
+        two.push(extra);
+        assert_eq!(scan_areas(&two).len(), 2);
         assert!(parse_scn_xml("<other/>").is_err());
         assert!(parse_scn_xml(r#"<scn><collection/></scn>"#).is_err());
     }

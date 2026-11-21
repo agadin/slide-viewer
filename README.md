@@ -63,7 +63,8 @@ New here? Start with [getting started](docs/help/getting-started.md); if somethi
 
 - **Opens the formats courses use**: Hamamatsu NDPI and VMS, Aperio SVS, Philips, Huron and generic
   tiled TIFF, MIRAX, Leica SCN, Ventana BIF, Argos AVS, DICOM, Zeiss CZI and ZVI, Olympus VSI, plus JPEG, PNG, BMP, WebP and flat TIFF
-  pictures ([file formats](docs/help/file-formats.md)).
+  pictures. Fluorescence slides (Olympus, Leica, Zeiss) show their channels combined in colour
+  ([file formats](docs/help/file-formats.md)).
 - **A folder of slides at a glance**: choose a parent folder to get a tree of its subfolders with a
   thumbnail per slide, search, a badge on annotated slides, and **[ ]** to step through them. Or open
   a single slide with **File ▸ Open Slide…** ([the slide browser](docs/help/browser.md)).

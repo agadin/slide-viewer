@@ -27,9 +27,13 @@ Every file is shown the same way: zoom and pan, pins and rulers, adjustments. An
 | Zeiss AxioVision | `.zvi` | The older Zeiss format. Fluorescence channels are combined in the colours saved in the file, with brightness stretched so faint signals show. Z-stacks show every plane, and mosaics are assembled from their tiles. The first time a large mosaic opens it is prepared and kept in the app's cache. Uncompressed, JPEG and zlib-compressed planes are read. |
 | Ordinary pictures | `.jpg`, `.jpeg`, `.png`, `.bmp`, `.webp`, flat `.tif` | Photos, screenshots and stitched images. Very large flat TIFFs are prepared once and kept in the app's cache, so the next time they open at once. Usually [uncalibrated](measuring.md#uncalibrated-slides). |
 
-Slides are read with [OpenSlide](https://openslide.org) and, for Zeiss files, [libCZI](https://github.com/ZEISS/libczi). Both are built into the app. The label, macro and thumbnail pictures a scanner saves are used where the file has them.
+Slides are read with [OpenSlide](https://openslide.org) and, for Zeiss `.czi` files, [libCZI](https://github.com/ZEISS/libczi). Both are built into the app. Olympus `.vsi`, Zeiss `.zvi`, VENTANA DP 200 `.bif` and fluorescence Leica `.scn` slides are read by the app itself. The label, macro and thumbnail pictures a scanner saves are used where the file has them.
 
-Olympus `.vsi` slides are read by the app itself.
+### Not supported
+
+- **Leica `.scn` slides with scan areas at different magnifications** (for example a 5× and a 40× area on one slide): OpenSlide can't combine them, and Slide Viewer doesn't yet. The app says so rather than showing one area and hiding the rest.
+- **Confocal and microscope-camera formats: Leica `.lif`, Olympus `.oir`, Nikon `.nd2`**: these hold research stacks (many channels, time series), not scanned teaching slides, so they aren't read. Export a whole-slide TIFF or OME-TIFF instead.
+- **Other formats** (for example Bio-Formats-only ones): convert them to OME-TIFF with QuPath or bfconvert and open that.
 
 
 ### Scale and measurements
