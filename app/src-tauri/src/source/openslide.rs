@@ -97,6 +97,10 @@ impl OpenSlideSource {
         let (shift_x, shift_y) = crop.centre_shift_nm(full_w, full_h, mpp_x, mpp_y);
         let cropped = (crop.w, crop.h) != (full_w, full_h);
         let info = SourceInfo {
+            time_points: vec![],
+            series: vec![],
+            series_index: 0,
+            series_kind: "Image".into(),
             format: "openslide".into(),
             vendor,
             width,

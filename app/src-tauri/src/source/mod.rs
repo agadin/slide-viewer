@@ -51,6 +51,53 @@ pub struct ZPlane {
     pub label: String,
 }
 
+/// One time point of a time series. `index` is what the tile z's time part carries (see `split_z`).
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TimePoint {
+    pub index: u32,
+    /// time since the start of the acquisition, seconds (None when the file doesn't say)
+    pub seconds: Option<f64>,
+    /// shown on the slider, e.g. "12.5 s" or "T 3"
+    pub label: String,
+}
+
+/// The tile `z` carries both the focal plane and the time point: `z = plane + t * T_STRIDE`.
+/// Backends without a time axis never see t > 0 (the frontend only sends it when
+/// `time_points` has more than one entry).
+pub const T_STRIDE: u32 = 1 << 16;
+
+/// Split a tile `z` into (focal plane index, time point index).
+pub fn split_z(z: u32) -> (u32, u32) {
+    (z % T_STRIDE, z / T_STRIDE)
+}
+
+/// Time points with labels from their times in seconds (None → "T n"), index = position.
+pub fn make_time_points(seconds: &[Option<f64>]) -> Vec<TimePoint> {
+    if seconds.len() <= 1 {
+        return vec![];
+    }
+    seconds
+        .iter()
+        .enumerate()
+        .map(|(i, s)| TimePoint { index: i as u32, seconds: *s, label: s.map(time_label).unwrap_or_else(|| format!("T {}", i + 1)) })
+        .collect()
+}
+
+/// "0 s", "12.5 s", "2 min 5 s", "1 h 02 min"
+pub fn time_label(secs: f64) -> String {
+    let s = secs.max(0.0);
+    if s < 60.0 {
+        format!("{} s", trim_num(if s < 10.0 { (s * 100.0).round() / 100.0 } else { (s * 10.0).round() / 10.0 }))
+    } else if s < 3600.0 {
+        let m = (s / 60.0).floor();
+        format!("{} min {} s", m, (s - m * 60.0).round() as i64)
+    } else {
+        let h = (s / 3600.0).floor();
+        format!("{} h {:02} min", h, ((s - h * 3600.0) / 60.0).round() as i64)
+    }
+}
+
 /// What a backend knows about its image.
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -75,6 +122,15 @@ pub struct SourceInfo {
     pub z_planes: Vec<ZPlane>,
     /// associated image names ("thumbnail", "macro", "label", …)
     pub associated: Vec<String>,
+    /// time points; empty (or one) when the file has no time series
+    pub time_points: Vec<TimePoint>,
+    /// the images in a file that holds several (a .lif's images, an .nd2's stage positions), by
+    /// name in file order; empty when there's only one. Each is opened separately
+    /// (`open_source(path, series)`); `series_index` says which one this is.
+    pub series: Vec<String>,
+    pub series_index: u32,
+    /// what one entry of `series` is called in the UI: "Image" or "Position"
+    pub series_kind: String,
 }
 
 impl SourceInfo {
@@ -93,6 +149,10 @@ impl SourceInfo {
             levels: vec![LevelInfo { width, height, downsample: 1.0 }],
             z_planes: vec![single_plane()],
             associated: vec![],
+            time_points: vec![],
+            series: vec![],
+            series_index: 0,
+            series_kind: "Image".into(),
         }
     }
 }
@@ -156,7 +216,8 @@ pub trait SlideSource: Send + Sync {
 
     /// One Deep-Zoom tile as RGB. `level` follows OpenSeadragon: `dz_max_level(w, h)` is full
     /// resolution and each lower level halves the size. Edge tiles are smaller than TILE_SIZE.
-    /// `z` is a `ZPlane::index`; backends without focal planes treat any z as 0.
+    /// `z` is a `ZPlane::index` plus the time point times `T_STRIDE` (`split_z`); backends without
+    /// focal planes treat any plane as 0, and only backends with `time_points` see a time part.
     fn tile(&self, level: u32, x: u32, y: u32, z: u32) -> Result<RgbImage, String>;
 
     /// An associated image by name (see `SourceInfo::associated`).
@@ -383,7 +444,8 @@ pub fn is_supported(path: &str) -> bool {
 }
 
 /// Open a file with the first backend that accepts it (not registered: see `SlideRegistry::open`).
-pub fn open_source(path: &str) -> Result<Arc<dyn SlideSource>, String> {
+/// `series` picks one image of a multi-image file (`SourceInfo::series`); 0 is the default image.
+pub fn open_source(path: &str, series: u32) -> Result<Arc<dyn SlideSource>, String> {
     let backends = backends_for(path);
     if backends.is_empty() {
         return Err(format!("{path}: not a supported image format"));
@@ -398,9 +460,9 @@ pub fn open_source(path: &str) -> Result<Arc<dyn SlideSource>, String> {
             Backend::Scn => scn::ScnSource::open(path).map(|s| Arc::new(s) as Arc<dyn SlideSource>),
             Backend::Vsi => vsi::VsiSource::open(path).map(|s| Arc::new(s) as Arc<dyn SlideSource>),
             Backend::Zvi => zvi::ZviSource::open(path).map(|s| Arc::new(s) as Arc<dyn SlideSource>),
-            Backend::Lif => lif::LifSource::open(path).map(|s| Arc::new(s) as Arc<dyn SlideSource>),
+            Backend::Lif => lif::LifSource::open_series(path, series).map(|s| Arc::new(s) as Arc<dyn SlideSource>),
             Backend::Oir => oir::OirSource::open(path).map(|s| Arc::new(s) as Arc<dyn SlideSource>),
-            Backend::Nd2 => nd2::Nd2Source::open(path).map(|s| Arc::new(s) as Arc<dyn SlideSource>),
+            Backend::Nd2 => nd2::Nd2Source::open_series(path, series).map(|s| Arc::new(s) as Arc<dyn SlideSource>),
         };
         match r {
             // every backend gets the shared tile LRU (cache.rs)
@@ -418,6 +480,10 @@ pub fn unsupported(what: &str) -> String {
 
 // ---------------------------------------------------------------- registry
 
+fn registry_key(path: &str, series: u32) -> String {
+    if series == 0 { path.to_string() } else { format!("{path}\u{0}{series}") }
+}
+
 struct Entry {
     source: Arc<dyn SlideSource>,
     info: SlideInfo,
@@ -432,13 +498,15 @@ pub struct SlideRegistry {
 }
 
 impl SlideRegistry {
-    pub fn open(&self, path: &str) -> Result<SlideInfo, String> {
-        if let Some(id) = self.by_path.lock().unwrap().get(path).copied() {
+    /// Open (or reuse) `path`'s image number `series` (0 for single-image files).
+    pub fn open(&self, path: &str, series: u32) -> Result<SlideInfo, String> {
+        let key = registry_key(path, series);
+        if let Some(id) = self.by_path.lock().unwrap().get(&key).copied() {
             if let Some(e) = self.by_id.lock().unwrap().get(&id) {
                 return Ok(e.info.clone());
             }
         }
-        let source = open_source(path)?;
+        let source = open_source(path, series)?;
         let id = {
             let mut n = self.next.lock().unwrap();
             *n += 1;
@@ -447,7 +515,7 @@ impl SlideRegistry {
         let si = source.info().clone();
         let info = SlideInfo { id, path: path.to_string(), tile_size: TILE_SIZE, max_level: dz_max_level(si.width, si.height), source: si };
         self.by_id.lock().unwrap().insert(id, Entry { source, info: info.clone() });
-        self.by_path.lock().unwrap().insert(path.to_string(), id);
+        self.by_path.lock().unwrap().insert(key, id);
         Ok(info)
     }
 
@@ -463,7 +531,7 @@ impl SlideRegistry {
     pub fn close(&self, id: u32) -> bool {
         let removed = self.by_id.lock().unwrap().remove(&id);
         if let Some(e) = &removed {
-            self.by_path.lock().unwrap().remove(&e.info.path);
+            self.by_path.lock().unwrap().remove(&registry_key(&e.info.path, e.info.source.series_index));
         }
         removed.is_some()
     }
@@ -521,9 +589,22 @@ mod tests {
             "mppX": 1.0, "mppY": 1.0, "calibrated": false, "xOffsetNm": 0.0, "yOffsetNm": 0.0,
             "levels": [{ "width": 1000, "height": 600, "downsample": 1.0 }],
             "zPlanes": [{ "index": 1, "offsetNm": -500.0, "label": "−0.5 µm" }, { "index": 0, "offsetNm": 0.0, "label": "0 µm" }],
-            "associated": ["thumbnail"]
+            "associated": ["thumbnail"],
+            "timePoints": [], "series": [], "seriesIndex": 0, "seriesKind": "Image"
         });
         assert_eq!(v, want);
+    }
+
+    #[test]
+    fn time_axis() {
+        assert_eq!(split_z(0), (0, 0));
+        assert_eq!(split_z(3), (3, 0));
+        assert_eq!(split_z(2 * T_STRIDE + 5), (5, 2));
+        assert!(make_time_points(&[Some(0.0)]).is_empty());
+        let t = make_time_points(&[Some(0.0), Some(2.5), Some(75.0), None, Some(3725.0)]);
+        let labels: Vec<_> = t.iter().map(|p| p.label.as_str()).collect();
+        assert_eq!(labels, ["0 s", "2.5 s", "1 min 15 s", "T 4", "1 h 02 min"]);
+        assert_eq!(t[3].index, 3);
     }
 
     #[test]

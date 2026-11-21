@@ -18,7 +18,7 @@ fn save(dir: &Path, name: &str, what: &str, img: &image::RgbImage) -> Result<(),
 }
 
 fn run(path: &str, out: &Path) -> Result<(), String> {
-    let src = open_source(path)?;
+    let src = open_source(path, 0)?;
     let info = src.info().clone();
     println!("{path}: {}", serde_json::to_string(&info).map_err(|e| e.to_string())?);
     let name = Path::new(path).file_name().unwrap().to_string_lossy().to_string();
@@ -66,7 +66,7 @@ fn run(path: &str, out: &Path) -> Result<(), String> {
 
 /// `<name>-region-x-y-w-h.png`: level-0 rectangle (x, y, w, h) scaled to fit 1024 px.
 fn region(path: &str, out: &Path, r: &[i64]) -> Result<(), String> {
-    let src = open_source(path)?;
+    let src = open_source(path, 0)?;
     let (ow, oh) = app_lib::source::fit(r[2], r[3], 1024);
     let img = src.region(r[0], r[1], r[2], r[3], ow, oh, 0)?;
     let name = Path::new(path).file_name().unwrap().to_string_lossy().to_string();

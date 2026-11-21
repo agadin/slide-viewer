@@ -905,6 +905,14 @@ fn mpp_plausible(m: f64) -> bool {
 }
 
 impl Nd2Source {
+    /// Image number `series` of the file (`SourceInfo::series`). TODO(series): only 0 so far.
+    pub fn open_series(path: &str, series: u32) -> Result<Nd2Source, String> {
+        if series != 0 {
+            return Err(format!("{path}: image {series} not found"));
+        }
+        Self::open(path)
+    }
+
     pub fn open(path: &str) -> Result<Nd2Source, String> {
         let mut f = File::open(path).map_err(|e| format!("{path}: {e}"))?;
         let head = read_exact_at(&mut f, 0, 12).map_err(|e| format!("{path}: {e}"))?;

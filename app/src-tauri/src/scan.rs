@@ -473,7 +473,7 @@ pub fn thumbnail(reg: &SlideRegistry, path: &str, max_px: u32, cache_dir: &Path)
             return Ok(b);
         }
     }
-    let src = source::open_source(path)?;
+    let src = source::open_source(path, 0)?;
     let img = render_thumbnail(&*src, max_px)?;
     drop(src);
     let jpg = source::encode_jpeg(&img, 82)?;
@@ -723,12 +723,12 @@ mod tests {
         for e in &r.entries {
             if e.name == "Leica__Leica-1.scn" {
                 // the scanned region (openslide.bounds-*), not the whole 53130 × 153470 glass
-                let i = source::open_source(&e.path).unwrap().info().clone();
+                let i = source::open_source(&e.path, 0).unwrap().info().clone();
                 assert_eq!((i.width, i.height, i.mpp_x), (36832, 38432, 0.5));
             }
             if e.name == "Argos__Argos-1.avs" {
                 // Argos (.avs), read by the bundled OpenSlide: cropped to the scanned bounds, calibrated
-                let i = source::open_source(&e.path).unwrap().info().clone();
+                let i = source::open_source(&e.path, 0).unwrap().info().clone();
                 assert_eq!((i.vendor.as_deref(), i.width, i.height, i.calibrated), (Some("argos"), 98816, 41472, true));
                 assert!((i.mpp_x - 0.383).abs() < 0.001, "mpp {}", i.mpp_x);
                 assert!(i.associated.iter().any(|a| a == "macro"), "{:?}", i.associated);

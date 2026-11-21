@@ -496,6 +496,14 @@ fn extent(im: &LifImage) -> (u64, u64) {
 }
 
 impl LifSource {
+    /// Image number `series` of the file (`SourceInfo::series`). TODO(series): only 0 so far.
+    pub fn open_series(path: &str, series: u32) -> Result<LifSource, String> {
+        if series != 0 {
+            return Err(format!("{path}: image {series} not found"));
+        }
+        Self::open(path)
+    }
+
     pub fn open(path: &str) -> Result<LifSource, String> {
         LifSource::open_image(path, None)
     }

@@ -49,12 +49,12 @@ fn encode(img: &image::RgbImage, format: Option<&str>) -> Result<tauri::ipc::Res
 // ------------------------------------------------------------------ slides (owner: formats)
 
 #[tauri::command]
-async fn open_slide(state: Reg<'_>, path: String) -> Result<SlideInfo, String> {
+async fn open_slide(state: Reg<'_>, path: String, series: Option<u32>) -> Result<SlideInfo, String> {
     if is_remote_path(&path) {
         return Err(format!("{path}: network paths are not allowed for slides"));
     }
     let reg = state.inner().clone();
-    blocking(move || reg.open(&path)).await
+    blocking(move || reg.open(&path, series.unwrap_or(0))).await
 }
 
 #[tauri::command]

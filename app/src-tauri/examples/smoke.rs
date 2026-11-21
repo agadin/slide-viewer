@@ -4,10 +4,20 @@
 //! renders the top-left full-resolution tile, a low-resolution tile and an overview, and checks
 //! they encode as JPEG. Exits non-zero on the first failure, so CI catches a library that didn't
 //! bundle or load (OpenSlide, libCZI) on that platform.
-use app_lib::source::{dz_max_level, encode_jpeg, open_source};
+use app_lib::source::{dz_max_level, encode_jpeg, open_source, T_STRIDE};
 
 fn check(path: &str) -> Result<(), String> {
-    let src = open_source(path)?;
+    check_series(path, 0)?;
+    // multi-image files (.lif images, .nd2 positions): the last one opens too
+    let n = open_source(path, 0)?.info().series.len() as u32;
+    if n > 1 {
+        check_series(path, n - 1)?;
+    }
+    Ok(())
+}
+
+fn check_series(path: &str, series: u32) -> Result<(), String> {
+    let src = open_source(path, series)?;
     let info = src.info();
     println!("{path}: {}", serde_json::to_string(info).map_err(|e| e.to_string())?);
     let max = dz_max_level(info.width, info.height);
@@ -24,6 +34,10 @@ fn check(path: &str) -> Result<(), String> {
         return Err(format!("overview has size {}x{}", o.width(), o.height()));
     }
     println!("  overview: {}x{}", o.width(), o.height());
+    if let Some(last) = info.time_points.last().filter(|_| info.time_points.len() > 1) {
+        let t = src.tile(max.saturating_sub(4), 0, 0, last.index * T_STRIDE).map_err(|e| format!("last time point: {e}"))?;
+        println!("  last time point ({}): {}x{}", last.label, t.width(), t.height());
+    }
     Ok(())
 }
 

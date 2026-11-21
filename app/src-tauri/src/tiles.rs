@@ -1,6 +1,6 @@
 //! The `slide://` tile URL scheme. FROZEN CONTRACT (CONTRACTS.md); shared by every backend.
 //!
-//!   /<slide id>/<z>/<level>/<x>_<y>.jpg   focal plane z (a `ZPlane::index`)
+//!   /<slide id>/<z>/<level>/<x>_<y>.jpg   focal plane + time: z = `ZPlane::index` + t × `T_STRIDE`
 //!   /<slide id>/<level>/<x>_<y>.jpg       the same with z = 0 (MSG's original form)
 //!
 //! `level` is the Deep-Zoom level (OpenSeadragon's), `x`/`y` the tile column/row.
