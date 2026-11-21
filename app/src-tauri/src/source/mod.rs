@@ -5,6 +5,7 @@
 //! (see CONTRACTS.md): lib.rs, scan.rs and the frontend rely on them. Add, don't rename.
 
 pub mod bif;
+pub mod scn;
 pub mod cache;
 pub mod czi;
 pub mod ndpi;
@@ -298,6 +299,8 @@ pub const PLAIN_EXTS: &[&str] = &[".jpg", ".jpeg", ".png", ".bmp", ".webp", ".ti
 pub const CZI_EXTS: &[&str] = &[".czi"];
 /// Ventana BIF: OpenSlide first, then `bif.rs` for the DP 200 files OpenSlide rejects.
 pub const BIF_EXTS: &[&str] = &[".bif"];
+/// Leica SCN: OpenSlide first, then `scn.rs` for the fluorescence files OpenSlide rejects.
+pub const SCN_EXTS: &[&str] = &[".scn"];
 /// Olympus cellSens / VS-series (pixels in the `_<name>_` folder next to the file).
 pub const VSI_EXTS: &[&str] = &[".vsi"];
 pub const ZVI_EXTS: &[&str] = &[".zvi"];
@@ -308,6 +311,7 @@ pub enum Backend {
     Plain,
     Czi,
     Bif,
+    Scn,
     Vsi,
     Zvi,
 }
@@ -335,6 +339,9 @@ pub fn backends_for(path: &str) -> Vec<Backend> {
     }
     if has(BIF_EXTS) {
         v.push(Backend::Bif);
+    }
+    if has(SCN_EXTS) {
+        v.push(Backend::Scn);
     }
     if has(PLAIN_EXTS) {
         v.push(Backend::Plain);
@@ -367,6 +374,7 @@ pub fn open_source(path: &str) -> Result<Arc<dyn SlideSource>, String> {
             Backend::Plain => plain::PlainSource::open(path).map(|s| Arc::new(s) as Arc<dyn SlideSource>),
             Backend::Czi => czi::CziSource::open(path).map(|s| Arc::new(s) as Arc<dyn SlideSource>),
             Backend::Bif => bif::BifSource::open(path).map(|s| Arc::new(s) as Arc<dyn SlideSource>),
+            Backend::Scn => scn::ScnSource::open(path).map(|s| Arc::new(s) as Arc<dyn SlideSource>),
             Backend::Vsi => vsi::VsiSource::open(path).map(|s| Arc::new(s) as Arc<dyn SlideSource>),
             Backend::Zvi => zvi::ZviSource::open(path).map(|s| Arc::new(s) as Arc<dyn SlideSource>),
         };
@@ -516,6 +524,8 @@ mod tests {
         assert_eq!(backends_for("x.png"), vec![Backend::Plain]);
         assert_eq!(backends_for("x.czi"), vec![Backend::Czi]);
         assert_eq!(backends_for("/a/Ventana-1.BIF"), vec![Backend::OpenSlide, Backend::Bif]);
+        // Leica: OpenSlide (brightfield), then our reader (fluorescence)
+        assert_eq!(backends_for("/a/Leica-Fluorescence-1.SCN"), vec![Backend::OpenSlide, Backend::Scn]);
         assert_eq!(backends_for("/a/X.ZVI"), vec![Backend::Zvi]);
         // Argos (Precipoint): read by the bundled OpenSlide 4.0.1
         assert_eq!(backends_for("/a/Argos-1.AVS"), vec![Backend::OpenSlide]);

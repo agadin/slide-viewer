@@ -79,7 +79,7 @@ fn read_at(f: &File, buf: &mut [u8], off: u64) -> Result<(), String> {
     }
 }
 
-fn read_vec(f: &File, off: u64, len: usize) -> Result<Vec<u8>, String> {
+pub(crate) fn read_vec(f: &File, off: u64, len: usize) -> Result<Vec<u8>, String> {
     let mut v = vec![0u8; len];
     read_at(f, &mut v, off)?;
     Ok(v)
@@ -89,14 +89,14 @@ fn read_vec(f: &File, off: u64, len: usize) -> Result<Vec<u8>, String> {
 
 /// One IFD entry: field type, count and the raw value/offset field (4 or 8 bytes, little endian).
 #[derive(Clone, Copy, Debug)]
-struct Entry {
+pub(crate) struct Entry {
     ty: u16,
     count: u64,
     raw: [u8; 8],
 }
 
 #[derive(Debug, Default)]
-struct Ifd {
+pub(crate) struct Ifd {
     entries: Vec<(u16, Entry)>,
 }
 
@@ -110,14 +110,14 @@ fn type_size(ty: u16) -> u64 {
 }
 
 /// The directories of a little-endian classic TIFF or BigTIFF (tags are read on demand).
-struct Tiff {
-    file: File,
+pub(crate) struct Tiff {
+    pub(crate) file: File,
     big: bool,
-    ifds: Vec<Ifd>,
+    pub(crate) ifds: Vec<Ifd>,
 }
 
 impl Tiff {
-    fn open(path: &str) -> Result<Tiff, String> {
+    pub(crate) fn open(path: &str) -> Result<Tiff, String> {
         let file = File::open(path).map_err(|e| e.to_string())?;
         let len = file.metadata().map_err(|e| e.to_string())?.len();
         let head = read_vec(&file, 0, 16.min(len as usize))?;
@@ -163,12 +163,12 @@ impl Tiff {
         Ok(Tiff { file, big, ifds })
     }
 
-    fn entry(&self, ifd: usize, tag: u16) -> Option<Entry> {
+    pub(crate) fn entry(&self, ifd: usize, tag: u16) -> Option<Entry> {
         self.ifds.get(ifd)?.entries.iter().find(|(t, _)| *t == tag).map(|(_, e)| *e)
     }
 
     /// The raw bytes of a tag's value.
-    fn bytes(&self, ifd: usize, tag: u16) -> Option<Vec<u8>> {
+    pub(crate) fn bytes(&self, ifd: usize, tag: u16) -> Option<Vec<u8>> {
         let e = self.entry(ifd, tag)?;
         let len = e.count.checked_mul(type_size(e.ty))?;
         if len > 256 << 20 {
@@ -182,7 +182,7 @@ impl Tiff {
     }
 
     /// An integer tag as a list (BYTE, SHORT, LONG, LONG8).
-    fn uints(&self, ifd: usize, tag: u16) -> Option<Vec<u64>> {
+    pub(crate) fn uints(&self, ifd: usize, tag: u16) -> Option<Vec<u64>> {
         let ty = self.entry(ifd, tag)?.ty;
         let b = self.bytes(ifd, tag)?;
         Some(match ty {
@@ -194,7 +194,7 @@ impl Tiff {
         })
     }
 
-    fn uint(&self, ifd: usize, tag: u16) -> Option<u64> {
+    pub(crate) fn uint(&self, ifd: usize, tag: u16) -> Option<u64> {
         self.uints(ifd, tag).and_then(|v| v.first().copied())
     }
 
@@ -210,7 +210,7 @@ impl Tiff {
     }
 
     /// A text tag (ASCII, or BYTE/UNDEFINED like XMP), without trailing NULs.
-    fn text(&self, ifd: usize, tag: u16) -> Option<String> {
+    pub(crate) fn text(&self, ifd: usize, tag: u16) -> Option<String> {
         let b = self.bytes(ifd, tag)?;
         let end = b.iter().rposition(|c| *c != 0).map(|i| i + 1).unwrap_or(0);
         Some(String::from_utf8_lossy(&b[..end]).into_owned())
@@ -222,7 +222,7 @@ fn decode_jpeg(bytes: &[u8]) -> Result<RgbImage, String> {
 }
 
 /// A TIFF JPEG tile with shared tables: tables without their EOI + the tile without its SOI.
-fn merge_jpeg_tables(tables: &[u8], tile: &[u8]) -> Vec<u8> {
+pub(crate) fn merge_jpeg_tables(tables: &[u8], tile: &[u8]) -> Vec<u8> {
     if tables.len() < 4 || !tile.starts_with(&[0xFF, 0xD8]) {
         return tile.to_vec();
     }
@@ -236,17 +236,17 @@ fn merge_jpeg_tables(tables: &[u8], tile: &[u8]) -> Vec<u8> {
 
 /// One start tag: name, attributes, parent element (index into the list).
 #[derive(Debug, Clone)]
-struct Element {
-    name: String,
-    attrs: Vec<(String, String)>,
-    parent: Option<usize>,
+pub(crate) struct Element {
+    pub(crate) name: String,
+    pub(crate) attrs: Vec<(String, String)>,
+    pub(crate) parent: Option<usize>,
 }
 
 impl Element {
-    fn attr(&self, k: &str) -> Option<&str> {
+    pub(crate) fn attr(&self, k: &str) -> Option<&str> {
         self.attrs.iter().find(|(a, _)| a == k).map(|(_, v)| v.as_str())
     }
-    fn num(&self, k: &str) -> Result<f64, String> {
+    pub(crate) fn num(&self, k: &str) -> Result<f64, String> {
         let v = self.attr(k).ok_or_else(|| format!("<{}> without {k}", self.name))?;
         v.trim().parse::<f64>().map_err(|_| format!("<{}> has bad {k}={v:?}", self.name))
     }
@@ -258,7 +258,7 @@ fn unescape(s: &str) -> String {
 
 /// The elements of an XML document in document order (enough for Ventana's attribute-only XML:
 /// text content, CDATA and namespaces are ignored).
-fn parse_xml(s: &str) -> Vec<Element> {
+pub(crate) fn parse_xml(s: &str) -> Vec<Element> {
     let mut out: Vec<Element> = Vec::new();
     let mut stack: Vec<usize> = Vec::new();
     let b = s.as_bytes();

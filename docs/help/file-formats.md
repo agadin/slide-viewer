@@ -15,7 +15,7 @@ Every file is shown the same way: zoom and pan, pins and rulers, adjustments. An
 | Hamamatsu | `.ndpi`, `.vms`, `.vmu` | NDP.view2's own format. Pins line up exactly with NDP.view2. Z-stacks show every focal plane. |
 | Aperio | `.svs` | |
 | Generic tiled TIFF | `.tif`, `.tiff` | Whole-slide TIFFs, including pyramidal and OME-TIFF files written by most scanners. |
-| Leica | `.scn` | Brightfield scans. The slide opens on the part of the glass that was scanned, not the whole slide. When several areas were scanned (for example four sections on one slide), they're shown together in their real places on the glass, with white where nothing was scanned. |
+| Leica | `.scn` | Brightfield and fluorescence scans (Leica SCN400 and SCN400F). Fluorescence channels are combined in the colours saved in the file. The slide opens on the part of the glass that was scanned, not the whole slide. When several areas were scanned (for example four sections on one slide), they're shown together in their real places on the glass, with white where nothing was scanned. |
 | 3DHISTECH MIRAX | `.mrxs` | Open the `.mrxs` file; its folder of data files must sit next to it with the same name. Like Leica files, it opens on the scanned part of the glass. |
 | Ventana / Roche | `.bif` | Slides from Ventana iScan scanners and from the newer VENTANA DP 200 (which OpenSlide can't read; Slide Viewer stitches their tiles itself). When the scanner scanned more than one area of the glass, they're shown together in their real places, with white between them. |
 | Philips | `.tiff` | |
@@ -31,7 +31,6 @@ Slides are read with [OpenSlide](https://openslide.org) and, for Zeiss files, [l
 
 Olympus `.vsi` slides are read by the app itself.
 
-**Not yet supported:** fluorescence Leica `.scn` files. Convert them to OME-TIFF (for example with QuPath or bfconvert) and open that.
 
 ### Scale and measurements
 
