@@ -676,4 +676,70 @@ mod tests {
         let _ = fs::remove_dir_all(&cache);
         let _ = fs::remove_dir_all(&fb);
     }
+
+    /// Leica `.scn` and iScan `.bif` samples from `tools/fetch-format-samples.py`
+    /// (`cargo test -- --ignored`; `SV_FORMAT_SAMPLES=<dir>` when they're elsewhere, e.g. in the
+    /// main checkout when testing a worktree): each is listed once and its thumbnail shows tissue,
+    /// not the blank glass around a small scanned region.
+    #[test]
+    #[ignore]
+    fn real_scn_and_bif_samples() {
+        let data = std::env::var_os("SV_FORMAT_SAMPLES")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test-data/formats"));
+        let names = ["Leica__Leica-1.scn", "Leica__Leica-2.scn", "Ventana__OS-2.bif"];
+        let present: Vec<&str> = names.iter().copied().filter(|n| data.join(n).is_file()).collect();
+        if present.is_empty() {
+            eprintln!("skipping: no samples in {}", data.display());
+            return;
+        }
+        // a folder of links, so the scan sees only these files
+        let d = tmpdir("scn-bif");
+        for n in &present {
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(data.join(n), d.join(n)).unwrap();
+            #[cfg(not(unix))]
+            return;
+        }
+        let fb = tmpdir("scn-bif-fb");
+        let r = scan_folder(&d.to_string_lossy(), &fb, &|_| {}).unwrap();
+        let listed: Vec<&str> = r.entries.iter().map(|e| e.name.as_str()).collect();
+        let mut want = present.clone();
+        want.sort();
+        assert_eq!(listed, want, "{:?}", r.errors);
+        let cache = tmpdir("scn-bif-cache");
+        let reg = SlideRegistry::default();
+        for e in &r.entries {
+            if e.name == "Leica__Leica-1.scn" {
+                // the scanned region (openslide.bounds-*), not the whole 53130 × 153470 glass
+                let i = source::open_source(&e.path).unwrap().info().clone();
+                assert_eq!((i.width, i.height, i.mpp_x), (36832, 38432, 0.5));
+            }
+            let jpg = thumbnail(&reg, &e.path, 256, &cache).unwrap_or_else(|err| panic!("{}: {err}", e.name));
+            let img = image::load_from_memory(&jpg).unwrap().to_rgb8();
+            // tissue (stained, so coloured or dark) vs white/grey background
+            let n = img
+                .pixels()
+                .filter(|p| {
+                    let (lo, hi) = (p.0.iter().min().copied().unwrap() as u32, p.0.iter().max().copied().unwrap() as u32);
+                    hi - lo > 20 || (p[0] as u32 + p[1] as u32 + p[2] as u32) < 3 * 200
+                })
+                .count();
+            let frac = n as f64 / (img.width() * img.height()) as f64;
+            // and some picture at all: the spread of brightness
+            let lum: Vec<f64> = img.pixels().map(|p| (p[0] as f64 + p[1] as f64 + p[2] as f64) / 3.0).collect();
+            let mean = lum.iter().sum::<f64>() / lum.len() as f64;
+            let sd = (lum.iter().map(|l| (l - mean).powi(2)).sum::<f64>() / lum.len() as f64).sqrt();
+            eprintln!("{}: thumbnail {}x{}, {:.0}% tissue, brightness sd {sd:.1}", e.name, img.width(), img.height(), frac * 100.0);
+            assert!(sd > 5.0, "{}: thumbnail is flat (sd {sd:.1})", e.name);
+            if e.ext == ".scn" {
+                // H&E: most of the scanned region is tissue (the whole glass would be < 10%).
+                // (OS-2.bif is a very pale Ki67 stain, so this isn't asked of it.)
+                assert!(frac > 0.25, "{}: thumbnail is mostly blank ({:.1}% tissue)", e.name, frac * 100.0);
+            }
+        }
+        for p in [d, fb, cache] {
+            let _ = fs::remove_dir_all(p);
+        }
+    }
 }
