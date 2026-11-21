@@ -2,8 +2,9 @@
 //!   cargo run --release --example inspect -- <slide> <out-dir> [<x> <y> <w> <h>]
 //! Writes <out-dir>/<name>-overview.png (the whole image, 1024 px), <name>-tissue.png (a
 //! full-resolution 1024 px region centred on the most tissue-dense part of the overview, so it is
-//! not blank background), <name>-thumb.png (what the folder browser shows) and one PNG per
-//! associated image, and prints the backend's info.
+//! not blank background; the brightest part on a dark fluorescence image), <name>-thumb.png (what
+//! the folder browser shows) and <name>-assoc-<name>.png per associated image, and prints the
+//! backend's info.
 use std::path::Path;
 
 use app_lib::scan::render_thumbnail;
@@ -23,7 +24,10 @@ fn run(path: &str, out: &Path) -> Result<(), String> {
     let name = Path::new(path).file_name().unwrap().to_string_lossy().to_string();
     let o = src.overview(1024, 0)?;
     save(out, &name, "overview", &o)?;
-    // densest tissue: the darkest 16x16 block of the overview
+    // densest tissue: the darkest 16x16 block of the overview (stain on a white background), or the
+    // brightest one when the background is dark (fluorescence)
+    let mean = o.pixels().map(|p| p[0] as u64 + p[1] as u64 + p[2] as u64).sum::<u64>() / (o.width() as u64 * o.height() as u64).max(1);
+    let dark = mean < 3 * 80;
     let (mut best, mut bx, mut by) = (u64::MAX, 0, 0);
     let b = 16u32;
     for y in (0..o.height().saturating_sub(b)).step_by(4) {
@@ -35,6 +39,7 @@ fn run(path: &str, out: &Path) -> Result<(), String> {
                     s += p[0] as u64 + p[1] as u64 + p[2] as u64;
                 }
             }
+            let s = if dark { u64::MAX - s } else { s };
             if s < best {
                 (best, bx, by) = (s, x, y);
             }
@@ -52,7 +57,7 @@ fn run(path: &str, out: &Path) -> Result<(), String> {
     save(out, &name, "thumb", &render_thumbnail(&*src, 256)?)?;
     for a in &info.associated {
         match src.associated(a) {
-            Ok(img) => save(out, &name, a, &img)?,
+            Ok(img) => save(out, &name, &format!("assoc-{a}"), &img)?,
             Err(e) => println!("  associated {a}: ERROR {e}"),
         }
     }

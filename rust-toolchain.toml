@@ -1,0 +1,6 @@
+# Rust for this repo (rustup installs it automatically). 1.92 is the minimum for hayro-jpeg2000 0.5,
+# the pure-Rust JPEG 2000 decoder Olympus .vsi files need for 16-bit fluorescence. The two macOS
+# targets are for the universal release build (tools/release.sh).
+[toolchain]
+channel = "1.92"
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]

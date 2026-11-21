@@ -150,7 +150,28 @@ mod tag {
     pub const IMAGE_BOUNDARY: i32 = 2053;
     pub const STACK_TYPE: i32 = 2074;
     pub const VSI_IMAGE_DATA: i32 = 2016;
+    /// one extra image dimension (second tag = its position after x, y in the ETS coordinates)
+    pub const DIMENSION: i32 = 2007;
+    /// one value of a dimension (second tag = the value)
+    pub const DIM_VALUE: i32 = 2008;
+    /// what a dimension is: 1 = Z, 4 = channel (on its first value)
+    pub const DIM_MEANING: i32 = 2023;
+    pub const Z_START: i32 = 2012;
+    pub const Z_INCREMENT: i32 = 2013;
+    pub const CHANNEL_NAME: i32 = 2021;
+    pub const CHANNEL_NAME2: i32 = 2419;
+    /// on a channel value: the display range (min, max) in sample units
+    pub const DISPLAY_RANGE: i32 = 2003;
+    /// on a channel value: the emission wavelength (a value + unit field)
+    pub const WAVELENGTH: i32 = 2417;
+    /// inside a value + unit field: the number and its unit
+    pub const FIELD_VALUE: i32 = 268435458;
+    pub const FIELD_UNIT: i32 = 268435456;
 }
+
+/// Dimension meanings (`tag::DIM_MEANING`).
+pub const MEANING_Z: i64 = 1;
+pub const MEANING_CHANNEL: i64 = 4;
 
 fn decode_val(t: u32, b: &[u8]) -> Option<Val> {
     let ints = |w: usize| -> Vec<i64> { b.chunks_exact(w).map(|c| i32::from_le_bytes(c.try_into().unwrap()) as i64).collect() };
@@ -279,6 +300,94 @@ pub struct StackMeta {
     pub size: Option<(i64, i64)>,
     /// for images stored inside the .vsi: the TIFF directory that holds it
     pub ifd: Option<i32>,
+    /// the extra dimensions after x, y, in ETS coordinate order (empty when the metadata has none)
+    pub dims: Vec<DimMeta>,
+}
+
+/// One extra image dimension (Z, channel, …) as the metadata describes it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DimMeta {
+    /// `MEANING_Z`, `MEANING_CHANNEL`, or another code (left alone)
+    pub meaning: Option<i64>,
+    /// Z: the first plane's position and the step between planes, µm
+    pub z_start_um: Option<f64>,
+    pub z_step_um: Option<f64>,
+    /// channel: one entry per value, in value order
+    pub channels: Vec<ChannelMeta>,
+}
+
+/// A fluorescence channel.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ChannelMeta {
+    pub name: String,
+    pub wavelength_nm: Option<f64>,
+    /// the display range the scanner software used (min, max), in sample units
+    pub display: Option<(f64, f64)>,
+}
+
+/// A number field (int or float).
+fn num(n: &Node) -> Option<f64> {
+    match n.val.as_ref()? {
+        Val::Int(i) => Some(*i as f64),
+        Val::Float(f) => Some(*f),
+        Val::Ints(v) => v.first().map(|i| *i as f64),
+        Val::Floats(v) => v.first().copied(),
+        Val::Str(_) => None,
+    }
+}
+
+/// A value + unit field (e.g. a wavelength or a z step), in µm.
+fn field_um(n: &Node) -> Option<f64> {
+    let v = n.child(tag::FIELD_VALUE).and_then(num)?;
+    let unit = match n.child(tag::FIELD_UNIT).and_then(|u| u.val.as_ref()) {
+        Some(Val::Str(s)) => unit_to_um(s)?,
+        _ => return None,
+    };
+    v.is_finite().then_some(v * unit)
+}
+
+fn dims_of(stack: &Node) -> Vec<DimMeta> {
+    let mut dims: Vec<&Node> = stack.kids.iter().filter(|k| k.tag == tag::DIMENSION).collect();
+    dims.sort_by_key(|d| d.sec.unwrap_or(0));
+    dims.into_iter()
+        .map(|d| {
+            let mut vals: Vec<&Node> = d.kids.iter().filter(|k| k.tag == tag::DIM_VALUE).collect();
+            vals.sort_by_key(|v| v.sec.unwrap_or(0));
+            let meaning = vals.iter().find_map(|v| match v.child(tag::DIM_MEANING).and_then(|m| m.val.as_ref()) {
+                Some(Val::Int(i)) => Some(*i),
+                _ => None,
+            });
+            let mut m = DimMeta { meaning, ..Default::default() };
+            if meaning == Some(MEANING_Z) {
+                if let Some(v0) = vals.first() {
+                    m.z_start_um = v0.child(tag::Z_START).and_then(field_um);
+                    m.z_step_um = v0.child(tag::Z_INCREMENT).and_then(field_um).filter(|s| *s > 0.0);
+                }
+            }
+            if meaning == Some(MEANING_CHANNEL) {
+                m.channels = vals
+                    .iter()
+                    .map(|v| {
+                        let name = [tag::CHANNEL_NAME, tag::CHANNEL_NAME2]
+                            .iter()
+                            .find_map(|t| match v.child(*t).and_then(|c| c.val.as_ref()) {
+                                Some(Val::Str(s)) if !s.trim().is_empty() => Some(s.trim().to_string()),
+                                _ => None,
+                            })
+                            .unwrap_or_default();
+                        let display = match v.child(tag::DISPLAY_RANGE).and_then(|c| c.val.as_ref()) {
+                            Some(Val::Floats(f)) if f.len() >= 2 && f[0].is_finite() && f[1] > f[0] => Some((f[0], f[1])),
+                            _ => None,
+                        };
+                        // µm → nm; only plausible light
+                        let wavelength_nm = v.child(tag::WAVELENGTH).and_then(field_um).map(|um| um * 1000.0).filter(|w| (300.0..=1100.0).contains(w));
+                        ChannelMeta { name, wavelength_nm, display }
+                    })
+                    .collect();
+            }
+            m
+        })
+        .collect()
 }
 
 /// A unit like "10^-6m^1" as µm per unit.
@@ -323,6 +432,7 @@ fn collect_stacks(nodes: &[Node], out: &mut Vec<StackMeta>) {
             if let Some(f) = n.child(tag::IMAGE_FRAME_VOLUME) {
                 m.ifd = f.kids.iter().find(|k| k.tag == tag::VSI_IMAGE_DATA).and_then(|k| k.sec);
             }
+            m.dims = dims_of(n);
             out.push(m);
         } else if n.tag == tag::COLLECTION_VOLUME || n.tag == tag::MULTIDIM_IMAGE_VOLUME {
             collect_stacks(&n.kids, out);
@@ -450,64 +560,185 @@ pub fn parse_tile_index(b: &[u8], h: &EtsHeader) -> Result<Vec<TileEntry>, Strin
     Ok(out)
 }
 
-/// Decode one tile to RGB.
-pub fn decode_tile(h: &EtsHeader, bytes: &[u8]) -> Result<RgbImage, String> {
+/// A decoded tile's samples, per channel (row-major), in the file's own units: 0..=`max`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Samples {
+    pub w: u32,
+    pub h: u32,
+    pub chans: Vec<Vec<f32>>,
+    /// full scale (255 for 8-bit, 65535 for 16-bit, 2^bits − 1 for JPEG 2000)
+    pub max: f32,
+}
+
+impl Samples {
+    /// As an RGB picture: three channels as colour, otherwise the first as grey, scaled from
+    /// `max` to 255 (no stretch: for colour and 8-bit images that are already display-ready).
+    pub fn to_rgb(&self) -> Result<RgbImage, String> {
+        let n = (self.w * self.h) as usize;
+        if self.chans.is_empty() || self.chans.iter().any(|c| c.len() < n) {
+            return Err("short tile".into());
+        }
+        let k = 255.0 / self.max.max(1.0);
+        let q = |v: f32| (v * k).round().clamp(0.0, 255.0) as u8;
+        let color = self.chans.len() >= 3;
+        Ok(RgbImage::from_fn(self.w, self.h, |x, y| {
+            let i = (y * self.w + x) as usize;
+            if color {
+                image::Rgb([q(self.chans[0][i]), q(self.chans[1][i]), q(self.chans[2][i])])
+            } else {
+                image::Rgb([q(self.chans[0][i]); 3])
+            }
+        }))
+    }
+}
+
+/// Decode one tile to its samples (full precision: 16-bit fluorescence keeps all its levels).
+pub fn decode_tile_samples(h: &EtsHeader, bytes: &[u8]) -> Result<Samples, String> {
+    let from_image = |img: image::DynamicImage| -> Samples {
+        let (w, ht) = (img.width(), img.height());
+        let sixteen = matches!(img.color().bytes_per_pixel() / img.color().channel_count().max(1), 2);
+        let color = img.color().has_color();
+        let n = if color { 3 } else { 1 };
+        let mut chans = vec![Vec::with_capacity((w * ht) as usize); n];
+        if sixteen {
+            let raw: Vec<u16> = if color { img.to_rgb16().into_raw() } else { img.to_luma16().into_raw() };
+            for (i, v) in raw.iter().enumerate() {
+                chans[i % n].push(*v as f32);
+            }
+        } else {
+            let raw: Vec<u8> = if color { img.to_rgb8().into_raw() } else { img.to_luma8().into_raw() };
+            for (i, v) in raw.iter().enumerate() {
+                chans[i % n].push(*v as f32);
+            }
+        }
+        Samples { w, h: ht, chans, max: if sixteen { 65535.0 } else { 255.0 } }
+    };
     match h.compression {
         COMP_RAW => {
             let bps = bytes_per_sample(h.pixel_type);
             let c = h.channels as usize;
             let (w, ht) = (h.tile_w, h.tile_h);
-            let need = w as usize * ht as usize * c * bps;
-            if bytes.len() < need {
+            let n = w as usize * ht as usize;
+            if bytes.len() < n * c * bps {
                 return Err("short raw ETS tile".into());
             }
-            let sample = |i: usize| -> u8 {
-                match bps {
-                    1 => bytes[i],
-                    2 => (u16::from_le_bytes([bytes[2 * i], bytes[2 * i + 1]]) >> 8) as u8,
-                    _ => bytes[i * bps + bps - 1],
-                }
+            let (get, max): (Box<dyn Fn(usize) -> f32>, f32) = match (h.pixel_type, bps) {
+                (_, 1) => (Box::new(|i| bytes[i] as f32), 255.0),
+                (4, 2) => (Box::new(|i| u16::from_le_bytes([bytes[2 * i], bytes[2 * i + 1]]) as f32), 65535.0),
+                (3, 2) => (Box::new(|i| (i16::from_le_bytes([bytes[2 * i], bytes[2 * i + 1]]) as f32).max(0.0)), 32767.0),
+                (t, _) => return Err(format!("unsupported: raw VSI tiles of pixel type {t}")),
             };
-            Ok(RgbImage::from_fn(w, ht, |x, y| {
-                let p = (y as usize * w as usize + x as usize) * c;
-                if c >= 3 {
-                    image::Rgb([sample(p), sample(p + 1), sample(p + 2)])
-                } else {
-                    let v = sample(p);
-                    image::Rgb([v, v, v])
-                }
-            }))
+            let chans = (0..c).map(|k| (0..n).map(|p| get(p * c + k)).collect()).collect();
+            Ok(Samples { w, h: ht, chans, max })
         }
-        COMP_JPEG => image::load_from_memory_with_format(bytes, image::ImageFormat::Jpeg).map(|i| i.to_rgb8()).map_err(|e| format!("JPEG tile: {e}")),
-        COMP_PNG => image::load_from_memory_with_format(bytes, image::ImageFormat::Png).map(|i| i.to_rgb8()).map_err(|e| format!("PNG tile: {e}")),
-        COMP_BMP => image::load_from_memory_with_format(bytes, image::ImageFormat::Bmp).map(|i| i.to_rgb8()).map_err(|e| format!("BMP tile: {e}")),
-        COMP_JPEG2000 => decode_j2k(bytes),
+        COMP_JPEG => image::load_from_memory_with_format(bytes, image::ImageFormat::Jpeg).map(from_image).map_err(|e| format!("JPEG tile: {e}")),
+        COMP_PNG => image::load_from_memory_with_format(bytes, image::ImageFormat::Png).map(from_image).map_err(|e| format!("PNG tile: {e}")),
+        COMP_BMP => image::load_from_memory_with_format(bytes, image::ImageFormat::Bmp).map(from_image).map_err(|e| format!("BMP tile: {e}")),
+        COMP_JPEG2000 => decode_j2k_samples(bytes),
         COMP_JPEG_LOSSLESS => Err("unsupported: lossless-JPEG VSI tiles".into()),
         c => Err(format!("unsupported: VSI tile compression {c}")),
     }
 }
 
-/// A JPEG 2000 codestream (or JP2 file) to RGB.
-pub fn decode_j2k(bytes: &[u8]) -> Result<RgbImage, String> {
+/// Decode one tile to RGB (colour and 8-bit tiles; see `Samples::to_rgb`).
+pub fn decode_tile(h: &EtsHeader, bytes: &[u8]) -> Result<RgbImage, String> {
+    decode_tile_samples(h, bytes)?.to_rgb()
+}
+
+/// A JPEG 2000 codestream (or JP2 file): every component at its full precision.
+pub fn decode_j2k_samples(bytes: &[u8]) -> Result<Samples, String> {
     let img = hayro_jpeg2000::Image::new(bytes, &hayro_jpeg2000::DecodeSettings::default()).map_err(|e| format!("JPEG 2000 tile: {e:?}"))?;
     let (w, h) = (img.width(), img.height());
-    let n = img.color_space().num_channels() as usize + usize::from(img.has_alpha());
-    let px = img.decode().map_err(|e| format!("JPEG 2000 tile: {e:?}"))?;
-    if px.len() < w as usize * h as usize * n || n == 0 {
+    let mut ctx = hayro_jpeg2000::DecoderContext::default();
+    let dec = img.decode(&mut ctx).map_err(|e| format!("JPEG 2000 tile: {e:?}"))?;
+    let comps = dec.components();
+    let n = w as usize * h as usize;
+    if comps.is_empty() || n == 0 || comps.iter().any(|c| c.samples().len() < n) {
         return Err("JPEG 2000 tile: short output".into());
     }
-    let color = img.color_space().num_channels() >= 3;
-    if color && n == 3 {
-        return RgbImage::from_raw(w, h, px).ok_or_else(|| "JPEG 2000 tile: bad size".into());
+    let bits = comps[0].bit_depth().clamp(1, 31);
+    // colour images keep 3 components (alpha dropped); anything else: the first, as grey
+    let take = if img.color_space().num_channels() >= 3 && comps.len() >= 3 { 3 } else { 1 };
+    let chans = comps[..take].iter().map(|c| c.samples()[..n].to_vec()).collect();
+    Ok(Samples { w, h, chans, max: ((1u64 << bits) - 1) as f32 })
+}
+
+/// A JPEG 2000 codestream (or JP2 file) to RGB.
+pub fn decode_j2k(bytes: &[u8]) -> Result<RgbImage, String> {
+    decode_j2k_samples(bytes)?.to_rgb()
+}
+
+// ---------------------------------------------------------------- fluorescence display
+
+/// A visible wavelength (nm) as a display colour, brightest component 1 (Bruton's approximation).
+/// Far red (> 645 nm, e.g. Cy5) stays red.
+pub fn wavelength_rgb(nm: f64) -> [f32; 3] {
+    let (r, g, b) = match nm {
+        w if w < 440.0 => (((440.0 - w) / 60.0).clamp(0.0, 1.0) * 0.5, 0.0, 1.0),
+        w if w < 490.0 => (0.0, (w - 440.0) / 50.0, 1.0),
+        w if w < 510.0 => (0.0, 1.0, (510.0 - w) / 20.0),
+        w if w < 580.0 => ((w - 510.0) / 70.0, 1.0, 0.0),
+        w if w < 645.0 => (1.0, (645.0 - w) / 65.0, 0.0),
+        _ => (1.0, 0.0, 0.0),
+    };
+    let m = r.max(g).max(b).max(1e-6);
+    [(r / m) as f32, (g / m) as f32, (b / m) as f32]
+}
+
+/// Colours for channels without a wavelength: blue, green, red, magenta, cyan, yellow.
+const PALETTE: [[f32; 3]; 6] = [[0.0, 0.3, 1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [1.0, 0.0, 1.0], [0.0, 1.0, 1.0], [1.0, 1.0, 0.0]];
+
+/// How one channel is shown: its colour and the sample range mapped to black..full colour.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChanLook {
+    /// position of the channel's value in `Pyramid::c_values`
+    pub pos: u32,
+    pub color: [f32; 3],
+    pub lo: f32,
+    pub hi: f32,
+}
+
+/// Add stretched channels in their colours; None when no channel had data.
+pub fn composite(w: u32, h: u32, layers: &[(&ChanLook, &[f32])]) -> Option<RgbImage> {
+    if layers.is_empty() {
+        return None;
     }
-    Ok(RgbImage::from_fn(w, h, |x, y| {
-        let p = (y as usize * w as usize + x as usize) * n;
-        if color {
-            image::Rgb([px[p], px[p + 1], px[p + 2]])
-        } else {
-            image::Rgb([px[p], px[p], px[p]])
+    let n = (w * h) as usize;
+    let mut acc = vec![0f32; n * 3];
+    for (look, v) in layers {
+        let span = (look.hi - look.lo).max(1e-6);
+        for (i, s) in v.iter().take(n).enumerate() {
+            let t = ((s - look.lo) / span).clamp(0.0, 1.0);
+            if t > 0.0 {
+                for c in 0..3 {
+                    acc[i * 3 + c] += t * look.color[c];
+                }
+            }
         }
-    }))
+    }
+    RgbImage::from_raw(w, h, acc.iter().map(|a| (a.clamp(0.0, 1.0) * 255.0).round() as u8).collect())
+}
+
+/// The (low, high) display range of sample values: the 0.5th and 99.8th percentiles, so a few hot
+/// pixels don't set the white point. None when there's nothing to measure.
+pub fn auto_range(values: &[f32]) -> Option<(f32, f32)> {
+    let mut v: Vec<f32> = values.iter().copied().filter(|x| x.is_finite()).collect();
+    if v.len() < 16 {
+        return None;
+    }
+    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let at = |q: f64| v[((v.len() - 1) as f64 * q).round() as usize];
+    let (lo, hi) = (at(0.005), at(0.998));
+    (hi > lo).then_some((lo, hi))
+}
+
+/// How a pyramid's tiles become RGB.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Look {
+    /// colour or 8-bit grey tiles, shown as they are
+    Plain,
+    /// fluorescence (or 16-bit grey): each channel stretched and added in its colour
+    Composite(Vec<ChanLook>),
 }
 
 /// One ETS pyramid, ready to read.
@@ -516,16 +747,35 @@ pub struct Pyramid {
     pub head: EtsHeader,
     /// level sizes, full resolution first
     pub levels: Vec<(u32, u32)>,
-    /// (level, col, row, plane position) → (offset, len)
-    tiles: HashMap<(u32, u32, u32, u32), (u64, u32)>,
+    /// (level, col, row, plane position, channel position) → (offset, len)
+    tiles: HashMap<(u32, u32, u32, u32, u32), (u64, u32)>,
     /// the extra dimension used as z (index into `TileEntry::coords`) and its values, ascending
     pub z_dim: Option<usize>,
     pub z_values: Vec<i32>,
+    /// the extra dimension holding fluorescence channels, and its values, ascending
+    pub c_dim: Option<usize>,
+    pub c_values: Vec<i32>,
+    pub look: Look,
+    /// what empty areas are filled with (black for fluorescence)
+    pub background: [u8; 3],
     cache: Mutex<Lru<(u32, u32, u32, u32), Arc<RgbImage>>>,
 }
 
+/// The extra dimensions' roles: (z, channel) as indices into `TileEntry::coords`. From the
+/// metadata when it describes the extra dimensions: its k-th dimension is the ETS file's k-th extra
+/// one (cellSens lists one more, trailing dimension than the ETS file has). Otherwise the first
+/// dimension with more than one value at full resolution is z (the layout of brightfield z-stacks).
+pub fn dimension_roles(dims: &[DimMeta], extra: usize, values: &dyn Fn(usize) -> Vec<i32>) -> (Option<usize>, Option<usize>) {
+    let dims = &dims[..dims.len().min(extra)];
+    if extra > 0 && dims.len() == extra && dims.iter().any(|d| d.meaning.is_some()) {
+        let find = |m: i64| (0..extra).find(|k| dims[*k].meaning == Some(m)).map(|k| k + 2);
+        return (find(MEANING_Z), find(MEANING_CHANNEL));
+    }
+    ((2..2 + extra).find(|d| values(*d).len() > 1), None)
+}
+
 impl Pyramid {
-    pub fn open(path: &Path, size: Option<(i64, i64)>, cache_bytes: usize) -> Result<Pyramid, String> {
+    pub fn open(path: &Path, size: Option<(i64, i64)>, cache_bytes: usize, dims: &[DimMeta]) -> Result<Pyramid, String> {
         let file = File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
         let flen = file.metadata().map_err(|e| e.to_string())?.len();
         let sis = read_vec(&file, 0, 64.min(flen as usize))?;
@@ -541,10 +791,10 @@ impl Pyramid {
             return Err("ETS tile index outside the file".into());
         }
         let entries = parse_tile_index(&read_vec(&file, head.index_offset, idx_len as usize)?, &head)?;
-        Pyramid::build(file, head, entries, size, cache_bytes)
+        Pyramid::build(file, head, entries, size, cache_bytes, dims)
     }
 
-    fn build(file: File, head: EtsHeader, entries: Vec<TileEntry>, size: Option<(i64, i64)>, cache_bytes: usize) -> Result<Pyramid, String> {
+    fn build(file: File, head: EtsHeader, entries: Vec<TileEntry>, size: Option<(i64, i64)>, cache_bytes: usize, dims: &[DimMeta]) -> Result<Pyramid, String> {
         let l0: Vec<&TileEntry> = entries.iter().filter(|e| e.level == 0).collect();
         if l0.is_empty() {
             return Err("ETS file has no full-resolution tiles".into());
@@ -562,57 +812,139 @@ impl Pyramid {
         }
         let nlev = entries.iter().map(|e| e.level).max().unwrap() + 1;
         let levels: Vec<(u32, u32)> = (0..nlev).map(|k| (((w >> k) as u32).max(1), ((h >> k) as u32).max(1))).collect();
-        // z: the first extra dimension with more than one value at full resolution
         let extra = head.ndims as usize - 2 - usize::from(head.pyramid);
-        let mut z_dim = None;
-        let mut z_values = vec![0];
-        for d in 2..2 + extra {
+        let values = |d: usize| -> Vec<i32> {
             let mut v: Vec<i32> = l0.iter().map(|e| e.coords[d]).collect();
             v.sort();
             v.dedup();
-            if v.len() > 1 {
-                z_dim = Some(d);
-                z_values = v;
-                break;
-            }
-        }
-        // other extra dimensions (channels, time): keep their smallest value
+            v
+        };
+        let (z_dim, c_dim) = dimension_roles(dims, extra, &values);
+        let z_values = z_dim.map(values).unwrap_or_else(|| vec![0]);
+        let c_values = c_dim.map(values).unwrap_or_else(|| vec![0]);
+        // other extra dimensions (time, …): keep their smallest value
         let fixed: Vec<(usize, i32)> = (2..2 + extra)
-            .filter(|d| Some(*d) != z_dim)
+            .filter(|d| Some(*d) != z_dim && Some(*d) != c_dim)
             .map(|d| (d, l0.iter().map(|e| e.coords[d]).min().unwrap()))
             .collect();
+        let pos = |dim: Option<usize>, vals: &[i32], e: &TileEntry| -> Option<u32> {
+            match dim {
+                Some(d) => vals.binary_search(&e.coords[d]).ok().map(|p| p as u32),
+                None => Some(0),
+            }
+        };
         let mut tiles = HashMap::with_capacity(entries.len());
         for e in &entries {
             if fixed.iter().any(|(d, v)| e.coords[*d] != *v) || e.len == 0 {
                 continue;
             }
-            let zpos = match z_dim {
-                Some(d) => match z_values.binary_search(&e.coords[d]) {
-                    Ok(p) => p as u32,
-                    Err(_) => continue,
-                },
-                None => 0,
-            };
-            tiles.insert((e.level, e.coords[0] as u32, e.coords[1] as u32, zpos), (e.offset, e.len));
+            let (Some(zp), Some(cp)) = (pos(z_dim, &z_values, e), pos(c_dim, &c_values, e)) else { continue };
+            tiles.insert((e.level, e.coords[0] as u32, e.coords[1] as u32, zp, cp), (e.offset, e.len));
         }
-        Ok(Pyramid { file, head, levels, tiles, z_dim, z_values, cache: Mutex::new(Lru::new(cache_bytes)) })
+        // fluorescence: a channel dimension, or a single deep (16-bit) grey channel
+        let deep_grey = head.channels == 1 && bytes_per_sample(head.pixel_type) > 1;
+        let look = if c_dim.is_some() || deep_grey {
+            let meta = c_dim.and_then(|d| dims.get(d - 2)).map(|m| m.channels.as_slice()).unwrap_or(&[]);
+            let single = c_values.len() == 1;
+            Look::Composite(
+                c_values
+                    .iter()
+                    .enumerate()
+                    .map(|(p, v)| {
+                        let m = usize::try_from(*v).ok().and_then(|i| meta.get(i));
+                        let color = if single && c_dim.is_none() {
+                            [1.0; 3]
+                        } else {
+                            m.and_then(|m| m.wavelength_nm).map(wavelength_rgb).unwrap_or(PALETTE[p % PALETTE.len()])
+                        };
+                        let (lo, hi) = m.and_then(|m| m.display).map(|(a, b)| (a as f32, b as f32)).unwrap_or((f32::NAN, f32::NAN));
+                        ChanLook { pos: p as u32, color, lo, hi }
+                    })
+                    .collect(),
+            )
+        } else {
+            Look::Plain
+        };
+        let background = if matches!(look, Look::Composite(_)) { [0; 3] } else { head.background };
+        let mut py = Pyramid { file, head, levels, tiles, z_dim, z_values, c_dim, c_values, look, background, cache: Mutex::new(Lru::new(cache_bytes)) };
+        py.fill_display_ranges();
+        Ok(py)
+    }
+
+    /// Channels without a saved display range: measure one from the coarsest level.
+    fn fill_display_ranges(&mut self) {
+        let Look::Composite(chans) = &self.look else { return };
+        if chans.iter().all(|c| c.hi > c.lo) {
+            return;
+        }
+        let top = self.levels.len() as u32 - 1;
+        let zmid = (self.z_values.len() / 2) as u32;
+        let mut ranges = Vec::new();
+        for c in chans {
+            if c.hi > c.lo {
+                ranges.push((c.lo, c.hi));
+                continue;
+            }
+            let mut vals = Vec::new();
+            let mut keys: Vec<_> = self.tiles.keys().filter(|k| k.0 == top && k.3 == zmid && k.4 == c.pos).copied().collect();
+            keys.sort();
+            for k in keys.into_iter().take(64) {
+                let (off, len) = self.tiles[&k];
+                if let Ok(bytes) = read_vec(&self.file, off, len as usize) {
+                    if let Ok(s) = decode_tile_samples(&self.head, &bytes) {
+                        vals.extend_from_slice(&s.chans[0]);
+                    }
+                }
+            }
+            let max = match bytes_per_sample(self.head.pixel_type) {
+                1 => 255.0,
+                _ => 65535.0,
+            };
+            ranges.push(auto_range(&vals).unwrap_or((0.0, max)));
+        }
+        if let Look::Composite(chans) = &mut self.look {
+            for (c, (lo, hi)) in chans.iter_mut().zip(ranges) {
+                c.lo = lo;
+                c.hi = hi;
+            }
+        }
     }
 
     pub fn planes(&self) -> usize {
         self.z_values.len()
     }
 
-    fn tile(&self, level: u32, col: u32, row: u32, zpos: u32) -> Result<Option<Arc<RgbImage>>, String> {
-        let key = (level, col, row, zpos);
+    fn read_tile(&self, key: (u32, u32, u32, u32, u32)) -> Result<Option<Samples>, String> {
         let Some(&(off, len)) = self.tiles.get(&key) else { return Ok(None) };
-        if let Some(t) = self.cache.lock().unwrap().get(&key) {
-            return Ok(Some(t));
-        }
         if len > 64 << 20 {
             return Err("ETS tile too large".into());
         }
-        let bytes = read_vec(&self.file, off, len as usize)?;
-        let t = Arc::new(decode_tile(&self.head, &bytes)?);
+        decode_tile_samples(&self.head, &read_vec(&self.file, off, len as usize)?).map(Some)
+    }
+
+    fn tile(&self, level: u32, col: u32, row: u32, zpos: u32) -> Result<Option<Arc<RgbImage>>, String> {
+        let key = (level, col, row, zpos);
+        if let Some(t) = self.cache.lock().unwrap().get(&key) {
+            return Ok(Some(t));
+        }
+        let img = match &self.look {
+            Look::Plain => match self.read_tile((level, col, row, zpos, 0))? {
+                Some(s) => s.to_rgb()?,
+                None => return Ok(None),
+            },
+            Look::Composite(chans) => {
+                let mut layers = Vec::new();
+                for c in chans {
+                    if let Some(s) = self.read_tile((level, col, row, zpos, c.pos))? {
+                        layers.push((c, s));
+                    }
+                }
+                let Some((w, h)) = layers.first().map(|(_, s)| (s.w, s.h)) else { return Ok(None) };
+                let refs: Vec<(&ChanLook, &[f32])> = layers.iter().filter(|(_, s)| (s.w, s.h) == (w, h)).map(|(c, s)| (*c, s.chans[0].as_slice())).collect();
+                composite(w, h, &refs).ok_or("bad composite tile")?
+            }
+        };
+        let t = Arc::new(img);
         self.cache.lock().unwrap().put(key, t.clone(), t.as_raw().len() + 64);
         Ok(Some(t))
     }
@@ -620,7 +952,7 @@ impl Pyramid {
     /// Pixels (lx, ly, w, h) of `level`; missing tiles and areas outside the image are the
     /// background colour.
     pub fn read_level(&self, level: u32, lx: i64, ly: i64, w: u32, h: u32, zpos: u32) -> Result<RgbImage, String> {
-        let mut out = RgbImage::from_pixel(w.max(1), h.max(1), image::Rgb(self.head.background));
+        let mut out = RgbImage::from_pixel(w.max(1), h.max(1), image::Rgb(self.background));
         let Some(&(lw, lh)) = self.levels.get(level as usize) else { return Err("no such level".into()) };
         let x0 = lx.max(0);
         let y0 = ly.max(0);
@@ -642,7 +974,7 @@ impl Pyramid {
         if ex < w as i64 || ey < h as i64 {
             for (x, y, p) in out.enumerate_pixels_mut() {
                 if x as i64 >= ex || y as i64 >= ey {
-                    *p = image::Rgb(self.head.background);
+                    *p = image::Rgb(self.background);
                 }
             }
         }
@@ -757,7 +1089,20 @@ pub fn data_dir(vsi: &Path) -> Option<PathBuf> {
     Some(vsi.with_file_name(format!("_{stem}_")))
 }
 
-/// `stack<id>` folders and their `.ets` files (sorted), from the data folder.
+/// The image file of one stack folder: `frame_t*.ets` (the pixels; `frame_t.ets`, or
+/// `frame_t_0.ets` in cellSens 4 files). Other `.ets` files next to it, like `blob_*.ets`, hold
+/// side data, so they're only used when there's no frame file.
+pub fn pick_ets(mut files: Vec<PathBuf>) -> Option<PathBuf> {
+    files.sort();
+    let name = |p: &PathBuf| p.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+    let frame = files.iter().position(|p| name(p).starts_with("frame_t"));
+    match frame {
+        Some(i) => Some(files.swap_remove(i)),
+        None => files.into_iter().next(),
+    }
+}
+
+/// `stack<id>` folders and their image `.ets` file, from the data folder.
 fn stack_files(dir: &Path) -> Vec<(i32, PathBuf)> {
     let mut out = Vec::new();
     let Ok(rd) = std::fs::read_dir(dir) else { return out };
@@ -765,9 +1110,8 @@ fn stack_files(dir: &Path) -> Vec<(i32, PathBuf)> {
         let name = e.file_name().to_string_lossy().to_string();
         let Some(id) = name.strip_prefix("stack").and_then(|s| s.parse::<i32>().ok()) else { continue };
         let Ok(files) = std::fs::read_dir(e.path()) else { continue };
-        let mut ets: Vec<PathBuf> = files.flatten().map(|f| f.path()).filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("ets"))).collect();
-        ets.sort();
-        if let Some(p) = ets.into_iter().next() {
+        let ets: Vec<PathBuf> = files.flatten().map(|f| f.path()).filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("ets"))).collect();
+        if let Some(p) = pick_ets(ets) {
             out.push((id, p));
         }
     }
@@ -789,10 +1133,15 @@ fn assoc_name(m: &StackMeta) -> Option<&'static str> {
     }
 }
 
+/// Stack types that are never the main image: 1 overview, 2 sample mask, 4 focus map, 256
+/// macro/label photo, 1024 focus points, 8388608 sample mask (cellSens 4). Other types are images:
+/// 0 is a plain image and 64 a z-stack, for example.
+const AUXILIARY_KINDS: [i64; 6] = [1, 2, 4, 256, 1024, 8_388_608];
+
 /// Stacks that are never the main image (overview, masks, focus maps, macro/label photos).
-fn is_auxiliary(m: &StackMeta) -> bool {
+pub fn is_auxiliary(m: &StackMeta) -> bool {
     let n = m.name.to_lowercase();
-    m.kind.is_some_and(|k| k != 0) || ["overview", "macro", "label", "mask", "focus"].iter().any(|w| n.contains(w))
+    m.kind.is_some_and(|k| AUXILIARY_KINDS.contains(&k)) || ["overview", "macro", "label", "mask", "focus"].iter().any(|w| n.contains(w))
 }
 
 impl VsiSource {
@@ -822,7 +1171,7 @@ impl VsiSource {
         for (id, ets) in &stacks {
             let m = meta(*id);
             let budget = if is_auxiliary(&m) { ASSOC_CACHE_BYTES } else { MAIN_CACHE_BYTES };
-            match Pyramid::open(ets, m.size, budget) {
+            match Pyramid::open(ets, m.size, budget, &m.dims) {
                 Ok(py) => opened.push((m, py)),
                 Err(e) => errs.push(format!("stack{id}: {e}")),
             }
@@ -858,8 +1207,19 @@ impl VsiSource {
         }
         info.levels = main.levels.iter().enumerate().map(|(k, (lw, lh))| LevelInfo { width: *lw as i64, height: *lh as i64, downsample: (1u64 << k) as f64 }).collect();
         let plane_pos = if main.planes() > 1 {
-            // the format's focus offsets aren't known here: number the planes, middle one first
-            let (planes, pos) = make_planes(&vec![None; main.planes()], main.planes() / 2);
+            // focus offsets from the z dimension's start and step, when the metadata has them;
+            // the plane nearest 0 µm (else the middle one) opens first
+            let zm = main.z_dim.and_then(|d| mmeta.dims.get(d - 2));
+            let offsets: Vec<Option<f64>> = match zm.and_then(|m| Some((m.z_start_um?, m.z_step_um?))) {
+                Some((start, step)) => main.z_values.iter().map(|v| Some((start + *v as f64 * step) * 1000.0)).collect(),
+                None => vec![None; main.planes()],
+            };
+            let nominal = if offsets.iter().all(|o| o.is_some()) {
+                (0..offsets.len()).min_by(|a, b| offsets[*a].unwrap().abs().partial_cmp(&offsets[*b].unwrap().abs()).unwrap()).unwrap()
+            } else {
+                main.planes() / 2
+            };
+            let (planes, pos) = make_planes(&offsets, nominal);
             info.z_planes = planes;
             pos
         } else {
@@ -999,7 +1359,7 @@ mod tests {
         assert_eq!(tree[0].tag, 2000);
         let s = stacks_from_tree(&tree);
         assert_eq!(s.len(), 2, "{s:?}");
-        assert_eq!(s[0], StackMeta { id: 1, name: "Overview".into(), kind: Some(1), mpp: Some((3.5, 3.5)), size: Some((6753, 13196)), ifd: None });
+        assert_eq!(s[0], StackMeta { id: 1, name: "Overview".into(), kind: Some(1), mpp: Some((3.5, 3.5)), size: Some((6753, 13196)), ifd: None, dims: vec![] });
         assert_eq!(s[1].id, 10001);
         assert_eq!(s[1].name, "20x");
         assert_eq!(s[1].size, Some((48502, 77578)));
@@ -1024,6 +1384,11 @@ mod tests {
     // ---- synthetic ETS
 
     fn ets_file(compression: u32, tiles: &[(Vec<i32>, Vec<u8>)], ndims: u32) -> Vec<u8> {
+        ets_file_px(compression, tiles, ndims, 2, 3)
+    }
+
+    /// An ETS file with the given pixel type (2 = uchar, 4 = ushort) and samples per pixel.
+    fn ets_file_px(compression: u32, tiles: &[(Vec<i32>, Vec<u8>)], ndims: u32, pixel_type: u32, channels: u32) -> Vec<u8> {
         let mut f = vec![0u8; 64 + 228];
         f[0..4].copy_from_slice(b"SIS\0");
         f[4..8].copy_from_slice(&64u32.to_le_bytes());
@@ -1035,8 +1400,8 @@ mod tests {
         let e = 64;
         f[e..e + 4].copy_from_slice(b"ETS\0");
         f[e + 4..e + 8].copy_from_slice(&0x30003u32.to_le_bytes());
-        f[e + 8..e + 12].copy_from_slice(&2u32.to_le_bytes()); // uchar
-        f[e + 12..e + 16].copy_from_slice(&3u32.to_le_bytes()); // RGB
+        f[e + 8..e + 12].copy_from_slice(&pixel_type.to_le_bytes());
+        f[e + 12..e + 16].copy_from_slice(&channels.to_le_bytes());
         f[e + 16..e + 20].copy_from_slice(&4u32.to_le_bytes());
         f[e + 20..e + 24].copy_from_slice(&compression.to_le_bytes());
         f[e + 24..e + 28].copy_from_slice(&90u32.to_le_bytes());
@@ -1108,7 +1473,7 @@ mod tests {
             4,
         );
         let p = tmp("a.ets", &f);
-        let py = Pyramid::open(&p, Some((7, 3)), 1 << 20).unwrap();
+        let py = Pyramid::open(&p, Some((7, 3)), 1 << 20, &[]).unwrap();
         assert_eq!(py.levels, vec![(7, 3), (3, 1)]);
         assert_eq!(py.planes(), 2);
         let img = py.read_level(0, 2, 0, 6, 4, 0).unwrap();
@@ -1124,7 +1489,7 @@ mod tests {
         let r = py.region(0, 0, 7, 3, 3, 1, 0).unwrap();
         assert_eq!(r.dimensions(), (3, 1));
         // a metadata size bigger than the tile grid is ignored
-        assert_eq!(Pyramid::open(&p, Some((100, 3)), 1 << 20).unwrap().levels[0], (8, 4));
+        assert_eq!(Pyramid::open(&p, Some((100, 3)), 1 << 20, &[]).unwrap().levels[0], (8, 4));
     }
 
     #[test]
@@ -1143,6 +1508,135 @@ mod tests {
     }
 
     use image::ImageEncoder;
+
+    // ---- fluorescence: dimension metadata, channel compositing (cellSens 4 layout)
+
+    /// a value + unit field (wavelength, z start / step)
+    fn unit_field(tag: i32, unit: &str, v: f64) -> Vec<u8> {
+        volume(1, tag, None, &[block(&[field(13, tag::FIELD_UNIT, None, &utf16(unit)), field(10, tag::FIELD_VALUE, None, &v.to_le_bytes())])], false)
+    }
+
+    /// a dimension volume (2007/k) holding values (2008/j)
+    fn dimension(k: i32, values: &[Vec<Vec<u8>>]) -> Vec<u8> {
+        let vals: Vec<Vec<u8>> = values.iter().enumerate().map(|(j, fs)| volume(0, tag::DIM_VALUE, Some(j as i32), &[block(fs)], true)).collect();
+        volume(0, tag::DIMENSION, Some(k), &[block(&vals)], true)
+    }
+
+    fn fluo_stack(id: i32) -> Vec<u8> {
+        let z = dimension(0, &[vec![field(5, tag::DIM_MEANING, None, &1i32.to_le_bytes()), unit_field(tag::Z_START, "10^-6m^1", -2.0), unit_field(tag::Z_INCREMENT, "10^-6m^1", 1.0)]]);
+        let chan = |name: &str, nm: f64, lo: f64, hi: f64, first: bool| {
+            let mut f = Vec::new();
+            if first {
+                f.push(field(5, tag::DIM_MEANING, None, &4i32.to_le_bytes()));
+            }
+            f.push(field(8192, tag::CHANNEL_NAME, None, &utf16(name)));
+            f.push(field(260, tag::DISPLAY_RANGE, None, &doubles(&[lo, hi])));
+            f.push(unit_field(tag::WAVELENGTH, "10^-9m^1", nm));
+            f
+        };
+        let c = dimension(1, &[chan("DAPI", 455.0, 100.0, 3000.0, true), chan("FITC", 518.0, 50.0, 900.0, false)]);
+        let trailing = dimension(2, &[vec![]]);
+        let inner = block(&[
+            field(5, 2027, None, &0i32.to_le_bytes()),
+            volume(1, tag::MULTIDIM_STACK_PROPERTIES, None, &[block(&[field(8192, tag::STACK_NAME, None, &utf16("20x_DAPI, FITC_Z")), field(5, tag::STACK_TYPE, None, &64i32.to_le_bytes())])], false),
+            z,
+            c,
+            trailing,
+        ]);
+        volume(0, tag::MULTIDIM_IMAGE_VOLUME, Some(id), &[inner], true)
+    }
+
+    #[test]
+    fn fluorescence_metadata() {
+        let mut file = b"II*\0\0\0\0\0".to_vec();
+        file.extend(block(&[volume(0, tag::COLLECTION_VOLUME, Some(0), &[block(&[stack(1, "Label", 256, 2.7, 80, 90), fluo_stack(10002)])], true)]));
+        let s = stacks_from_tree(&parse_tag_tree(&file));
+        let f = s.iter().find(|m| m.id == 10002).unwrap();
+        assert_eq!(f.kind, Some(64));
+        // a z-stack image (type 64) is an image, a label photo (256) is not
+        assert!(!is_auxiliary(f) && is_auxiliary(&s[0]));
+        assert_eq!(f.dims.len(), 3, "z, channel, and cellSens' trailing dimension");
+        assert_eq!((f.dims[0].meaning, f.dims[0].z_start_um, f.dims[0].z_step_um), (Some(MEANING_Z), Some(-2.0), Some(1.0)));
+        assert_eq!(f.dims[1].meaning, Some(MEANING_CHANNEL));
+        assert_eq!(f.dims[1].channels.len(), 2);
+        assert_eq!(f.dims[1].channels[0], ChannelMeta { name: "DAPI".into(), wavelength_nm: Some(455.0), display: Some((100.0, 3000.0)) });
+        assert_eq!(f.dims[1].channels[1].name, "FITC");
+        assert_eq!(f.dims[2].meaning, None);
+    }
+
+    #[test]
+    fn roles_of_dimensions() {
+        let z = DimMeta { meaning: Some(MEANING_Z), ..Default::default() };
+        let c = DimMeta { meaning: Some(MEANING_CHANNEL), ..Default::default() };
+        let other = DimMeta::default();
+        let many = |_d: usize| vec![0, 1, 2];
+        // ETS: x, y, z, c; metadata lists one trailing dimension more
+        assert_eq!(dimension_roles(&[z.clone(), c.clone(), other.clone()], 2, &many), (Some(2), Some(3)));
+        // a 2-D fluorescence file: only the channel dimension
+        assert_eq!(dimension_roles(&[c.clone(), other.clone()], 1, &many), (None, Some(2)));
+        // no metadata: the first dimension with several values is z (brightfield z-stacks)
+        assert_eq!(dimension_roles(&[], 2, &|d| if d == 3 { vec![0, 1] } else { vec![0] }), (Some(3), None));
+        assert_eq!(dimension_roles(&[], 0, &many), (None, None));
+    }
+
+    #[test]
+    fn frame_file_beats_blob_file() {
+        let p = |s: &str| PathBuf::from(format!("/d/{s}"));
+        assert_eq!(pick_ets(vec![p("blob_21_f_Frame#0.ets"), p("frame_t.ets")]), Some(p("frame_t.ets")));
+        assert_eq!(pick_ets(vec![p("frame_t_0.ets")]), Some(p("frame_t_0.ets")));
+        assert_eq!(pick_ets(vec![p("other.ets")]), Some(p("other.ets")));
+        assert_eq!(pick_ets(vec![]), None);
+    }
+
+    #[test]
+    fn fluorescence_display() {
+        let dom = |c: [f32; 3]| (0..3).max_by(|a, b| c[*a].partial_cmp(&c[*b]).unwrap()).unwrap();
+        assert_eq!(dom(wavelength_rgb(455.0)), 2, "DAPI is blue");
+        assert_eq!(dom(wavelength_rgb(518.0)), 1, "FITC is green");
+        assert_eq!(wavelength_rgb(670.0), [1.0, 0.0, 0.0], "Cy5 is red");
+        // two channels add up; each is stretched between its own lo and hi
+        let blue = ChanLook { pos: 0, color: [0.0, 0.0, 1.0], lo: 100.0, hi: 300.0 };
+        let green = ChanLook { pos: 1, color: [0.0, 1.0, 0.0], lo: 0.0, hi: 1000.0 };
+        let img = composite(2, 1, &[(&blue, &[200.0, 5000.0]), (&green, &[0.0, 500.0])]).unwrap();
+        assert_eq!(img.get_pixel(0, 0).0, [0, 0, 128]);
+        assert_eq!(img.get_pixel(1, 0).0, [0, 128, 255]);
+        assert!(composite(1, 1, &[]).is_none());
+        let v: Vec<f32> = (0..1000).map(|i| i as f32).collect();
+        let (lo, hi) = auto_range(&v).unwrap();
+        assert!((4.0..=6.0).contains(&lo) && (996.0..=998.0).contains(&hi), "{lo} {hi}");
+        assert_eq!(auto_range(&[7.0; 100]), None);
+    }
+
+    #[test]
+    fn sixteen_bit_channels_are_composited_not_z_planes() {
+        // x, y, channel, level: two 16-bit grey channels of one 4×4 tile
+        let tile16 = |v: u16| v.to_le_bytes().repeat(16);
+        let f = ets_file_px(COMP_RAW, &[(vec![0, 0, 0, 0], tile16(1000)), (vec![0, 0, 1, 0], tile16(400))], 4, 4, 1);
+        let p = tmp("fl.ets", &f);
+        let chan = |nm, lo, hi| ChannelMeta { name: String::new(), wavelength_nm: Some(nm), display: Some((lo, hi)) };
+        let dims = [DimMeta { meaning: Some(MEANING_CHANNEL), channels: vec![chan(455.0, 0.0, 2000.0), chan(670.0, 0.0, 400.0)], ..Default::default() }, DimMeta::default()];
+        let py = Pyramid::open(&p, None, 1 << 20, &dims).unwrap();
+        assert_eq!(py.planes(), 1, "channels are not focal planes");
+        assert_eq!(py.c_values, vec![0, 1]);
+        assert_eq!(py.background, [0; 3], "fluorescence background is black");
+        // DAPI (455 nm: blue with a little green) at half (1000 of 0..2000), Cy5 red full (400 of 0..400)
+        assert_eq!(py.read_level(0, 0, 0, 1, 1, 0).unwrap().get_pixel(0, 0).0, [255, 38, 128]);
+        // without a saved range it's measured from the image; a lone 16-bit channel is grey
+        let g = ets_file_px(COMP_RAW, &[(vec![0, 0, 0], (0..16u16).flat_map(|i| (i * 100).to_le_bytes()).collect())], 3, 4, 1);
+        let py = Pyramid::open(&tmp("grey.ets", &g), None, 1 << 20, &[]).unwrap();
+        let Look::Composite(ch) = &py.look else { panic!("{:?}", py.look) };
+        assert_eq!(ch[0].color, [1.0; 3]);
+        assert!(ch[0].lo < ch[0].hi && ch[0].hi <= 1500.0, "{ch:?}");
+    }
+
+    #[test]
+    fn j2k_keeps_full_precision() {
+        // not reachable without an encoder; the 8-bit path still works through Samples
+        let s = Samples { w: 1, h: 1, chans: vec![vec![4095.0]], max: 4095.0 };
+        assert_eq!(s.to_rgb().unwrap().get_pixel(0, 0).0, [255; 3]);
+        let s = Samples { w: 1, h: 1, chans: vec![vec![255.0], vec![0.0], vec![128.0]], max: 255.0 };
+        assert_eq!(s.to_rgb().unwrap().get_pixel(0, 0).0, [255, 0, 128]);
+    }
 
     #[test]
     fn data_folder_name() {
@@ -1187,6 +1681,35 @@ mod tests {
                     s.associated(a).unwrap().save(format!("{dir}/vsi_{n}_assoc_{a}.png")).unwrap();
                 }
                 s.region(i.width / 2 - 512, i.height / 2 - 512, 1024, 1024, 1024, 1024, 0).unwrap().save(format!("{dir}/vsi_{n}_centre.png")).unwrap();
+            }
+        }
+        // cellSens 4 fluorescence (downloads.openmicroscopy.org/images/CellSens/evident): channels
+        // composited (not shown as focal planes), the real image (not the slide label), z offsets
+        for (n, size, planes) in [("Image_V4.1_FL_2D", (10911, 5460), 1usize), ("Image_V4.1_FL_3D", (9038, 5357), 5)] {
+            let p = format!("{root}/CellSens-evident/{n}.vsi");
+            if !Path::new(&p).exists() {
+                eprintln!("skipping: {p} not present");
+                continue;
+            }
+            seen += 1;
+            let s = VsiSource::open(&p).unwrap();
+            let i = s.info();
+            eprintln!("{n}: {}", serde_json::to_string(i).unwrap());
+            assert_eq!((i.width, i.height), size, "{n}: the main image, not the label");
+            assert_eq!(i.z_planes.len(), planes, "{n}");
+            assert!(i.associated.contains(&"overview".to_string()) && i.associated.contains(&"label".to_string()), "{n}: {:?}", i.associated);
+            if planes == 5 {
+                let mut offs: Vec<i64> = i.z_planes.iter().map(|z| z.offset_nm.unwrap().round() as i64).collect();
+                offs.sort();
+                assert_eq!(offs, vec![-2362, -1181, 0, 1181, 2362]);
+                assert_eq!(i.z_planes.iter().find(|z| z.index == 0).unwrap().offset_nm, Some(0.0), "opens in focus");
+            }
+            // 16-bit fluorescence must not come out black
+            let o = s.overview(512, 0).unwrap();
+            let bright = o.pixels().filter(|p| p.0.iter().any(|c| *c > 60)).count() as f64 / (o.width() * o.height()) as f64;
+            assert!(bright > 0.2, "{n}: overview is nearly black ({:.1}% lit)", bright * 100.0);
+            if let Ok(dir) = std::env::var("VSI_DUMP") {
+                o.save(format!("{dir}/vsi_{n}_overview.png")).unwrap();
             }
         }
         eprintln!("{seen} sample(s) checked");
