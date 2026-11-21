@@ -292,7 +292,7 @@ pub fn to_rgba(img: &RgbImage) -> Vec<u8> {
 // ---------------------------------------------------------------- backends by extension
 
 /// Formats OpenSlide reads (lower-case, with the dot).
-pub const OPENSLIDE_EXTS: &[&str] = &[".ndpi", ".svs", ".tif", ".tiff", ".scn", ".mrxs", ".vms", ".vmu", ".bif", ".svslide", ".dcm"];
+pub const OPENSLIDE_EXTS: &[&str] = &[".ndpi", ".svs", ".tif", ".tiff", ".scn", ".mrxs", ".vms", ".vmu", ".bif", ".svslide", ".dcm", ".avs"];
 /// Plain raster images (flat TIFFs are tried with OpenSlide first, then here).
 pub const PLAIN_EXTS: &[&str] = &[".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"];
 pub const CZI_EXTS: &[&str] = &[".czi"];
@@ -517,6 +517,9 @@ mod tests {
         assert_eq!(backends_for("x.czi"), vec![Backend::Czi]);
         assert_eq!(backends_for("/a/Ventana-1.BIF"), vec![Backend::OpenSlide, Backend::Bif]);
         assert_eq!(backends_for("/a/X.ZVI"), vec![Backend::Zvi]);
+        // Argos (Precipoint): read by the bundled OpenSlide 4.0.1
+        assert_eq!(backends_for("/a/Argos-1.AVS"), vec![Backend::OpenSlide]);
+        assert!(supported_extensions().contains(&".avs".to_string()));
         assert!(supported_extensions().contains(&".zvi".to_string()));
         assert!(backends_for("x.ndpa").is_empty());
         assert_eq!(backends_for("/a/OS-2.VSI"), vec![Backend::Vsi]);

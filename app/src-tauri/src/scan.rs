@@ -698,7 +698,7 @@ mod tests {
         let data = std::env::var_os("SV_FORMAT_SAMPLES")
             .map(PathBuf::from)
             .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test-data/formats"));
-        let names = ["Leica__Leica-1.scn", "Leica__Leica-2.scn", "Ventana__OS-2.bif"];
+        let names = ["Leica__Leica-1.scn", "Leica__Leica-2.scn", "Ventana__OS-2.bif", "Argos__Argos-1.avs"];
         let present: Vec<&str> = names.iter().copied().filter(|n| data.join(n).is_file()).collect();
         if present.is_empty() {
             eprintln!("skipping: no samples in {}", data.display());
@@ -725,6 +725,13 @@ mod tests {
                 // the scanned region (openslide.bounds-*), not the whole 53130 × 153470 glass
                 let i = source::open_source(&e.path).unwrap().info().clone();
                 assert_eq!((i.width, i.height, i.mpp_x), (36832, 38432, 0.5));
+            }
+            if e.name == "Argos__Argos-1.avs" {
+                // Argos (.avs), read by the bundled OpenSlide: cropped to the scanned bounds, calibrated
+                let i = source::open_source(&e.path).unwrap().info().clone();
+                assert_eq!((i.vendor.as_deref(), i.width, i.height, i.calibrated), (Some("argos"), 98816, 41472, true));
+                assert!((i.mpp_x - 0.383).abs() < 0.001, "mpp {}", i.mpp_x);
+                assert!(i.associated.iter().any(|a| a == "macro"), "{:?}", i.associated);
             }
             let jpg = thumbnail(&reg, &e.path, 256, &cache).unwrap_or_else(|err| panic!("{}: {err}", e.name));
             let img = image::load_from_memory(&jpg).unwrap().to_rgb8();

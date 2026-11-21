@@ -18,6 +18,7 @@ WANT = [
     "Hamamatsu-vms/CMU-1.zip",             # .vms (zip)
     "Zeiss/Zeiss-5-SlidePreview-JXR.czi",  # .czi
     "Zeiss/Zeiss-5-Flat.czi",              # .czi mosaic
+    "Argos/Argos-1.avs",                   # .avs (PreciPoint Argos), read by OpenSlide (93 MB)
     "Olympus/OS-1.zip",                    # .vsi, H&E (JPEG 2000 tiles in the _OS-1_ folder)
     "Olympus/OS-2.zip",                    # .vsi, Ki-67
     "Olympus/OS-3.zip",                    # .vsi, PTEN

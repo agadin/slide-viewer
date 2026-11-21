@@ -20,6 +20,7 @@ Every file is shown the same way: zoom and pan, pins and rulers, adjustments. An
 | Ventana / Roche | `.bif` | Slides from Ventana iScan scanners and from the newer VENTANA DP 200 (which OpenSlide can't read; Slide Viewer stitches their tiles itself). When the scanner scanned more than one area of the glass, they're shown together in their real places, with white between them. |
 | Philips | `.tiff` | |
 | Sakura | `.svslide` | |
+| Argos (PreciPoint) | `.avs` | Opens on the scanned areas, in their real places on the glass. For a z-stacked Argos file, only the middle focal plane is shown. |
 | DICOM | `.dcm` (whole-slide) | Open any `.dcm` file of the series; the rest of the series must be in the same folder. |
 | Zeiss | `.czi` | Brightfield and fluorescence (channels are coloured with the settings saved in the file). Z-stacks show every plane: see [Focal planes](viewing.md#focal-planes). Several scenes in one file are shown together. |
 | Olympus | `.vsi` | cellSens and VS-series scanners. Open the `.vsi` file; its data folder `_name_` (holding `stack…` folders) must sit next to it. The low-magnification overview scan is used where the file has one. |

@@ -22,3 +22,8 @@ manual/*.zip
 
 # course slides/annotations copied for tests (may hold course material)
 test-data/
+
+# worktree links to the main checkout (agents and parallel work)
+/test-data
+app/node_modules
+app/src-tauri/frameworks
