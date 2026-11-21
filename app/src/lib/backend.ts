@@ -10,7 +10,8 @@ export type ImgFormat = "jpeg" | "png" | "rgba";
 const bytes = async (p: Promise<ArrayBuffer>) => new Uint8Array(await p);
 
 // ---- slides (formats)
-export const openSlide = (path: string) => invoke<SlideInfo>("open_slide", { path });
+/** `series`: which image of a multi-image file (SlideInfo.series); 0 = the default one */
+export const openSlide = (path: string, series = 0) => invoke<SlideInfo>("open_slide", { path, series });
 export const closeSlide = (id: number) => invoke<boolean>("close_slide", { id });
 export const slideInfo = (id: number) => invoke<SlideInfo | null>("slide_info", { id });
 export const slideZPlanes = (id: number) => invoke<ZPlane[]>("slide_z_planes", { id });

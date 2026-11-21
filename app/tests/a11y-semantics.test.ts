@@ -12,6 +12,7 @@ import {
   kindName,
   openedMessage,
   planeMessage,
+  timeMessage,
   rotationMessage,
   sliderValueText,
   slideFacts,
@@ -136,6 +137,13 @@ test("a11y: viewer description and status text", () => {
   const z = info({ zPlanes: [0, 1, 2].map((i) => ({ index: i, offsetNm: (i - 1) * 1200, label: "" })) });
   eq(planeMessage(z, 2), "Focal plane 3 of 3, 1.2 micrometres.", "plane");
   eq(planeMessage(info(), 0), "", "single plane says nothing");
+  const tp = info({ timePoints: [0, 30, 90, 3725].map((s, i) => ({ index: i, seconds: s, label: ["0 s", "30 s", "1 min 30 s", "1 h 02 min"][i] })) });
+  eq(timeMessage(tp, 1), "Time point 2 of 4, 30 seconds.", "time point");
+  eq(timeMessage(tp, 2), "Time point 3 of 4, 1 minute 30 seconds.", "time point, minutes");
+  eq(timeMessage(tp, 3), "Time point 4 of 4, 1 hour 2 minutes.", "time point, hours");
+  eq(timeMessage(info({ timePoints: [0, 1].map((i) => ({ index: i, seconds: null, label: `T ${i + 1}` })) }), 1), "Time point 2 of 2.", "time point without times");
+  eq(timeMessage(info(), 0), "", "no time series says nothing");
+  ok(slideFacts(info({ series: ["a", "b", "c"], seriesIndex: 1, seriesKind: "Position" })).endsWith(", position 2 of 3"), "facts name the position");
   eq(rotationMessage(450), "Rotated to 90 degrees.", "rotation");
   eq(rotationMessage(-360), "Rotation 0 degrees.", "rotation home");
   ok(zoomChanged(null, 5) && zoomChanged(5, 10) && !zoomChanged(10, 10.2), "zoom debounce threshold");

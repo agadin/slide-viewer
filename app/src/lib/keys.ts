@@ -7,6 +7,7 @@
  *   +  −             zoom in / out                         ⇧ arrows   pan
  *   ,  .             rotate 90° left / right               ⇧, ⇧.      rotate by the free step (15°)
  *   PageUp/PageDown  focal plane up / down (z-stacks)      ⇧S         save a snapshot
+ *   T  ⇧T            next / previous time point (time series)
  *   X                keyboard cursor on / off              N  ⇧N      select the next / previous annotation
  *   ← → ↑ ↓          with the keyboard cursor on (and the slide focused): pan a tenth of the view, ⇧ a quarter
  *                    (otherwise ← → step slides, as [ ] always do)
@@ -63,6 +64,20 @@ export function stepPlane(dir: 1 | -1) {
   if (j !== i) st.setView({ z: planes[j].index });
 }
 
+/** next / previous time point of the open slide (time series); `wrap` loops at the ends (Play) */
+export function stepTime(dir: 1 | -1, wrap = false): boolean {
+  const st = useStore.getState();
+  const times = st.slide.info?.timePoints ?? [];
+  if (times.length <= 1) return false;
+  const i = Math.max(0, times.findIndex((p) => p.index === st.view.t));
+  let j = i + dir;
+  if (wrap) j = (j + times.length) % times.length;
+  j = Math.min(times.length - 1, Math.max(0, j));
+  if (j === i) return false;
+  st.setView({ t: times[j].index });
+  return true;
+}
+
 /** delete the selected annotations as one undo step; true when something was deleted */
 export function deleteSelection(): boolean {
   const st = useStore.getState();
@@ -91,6 +106,7 @@ export type KeyAction =
   | { kind: "rotate90"; dir: 1 | -1 }
   | { kind: "rotateFree"; dir: 1 | -1 }
   | { kind: "plane"; dir: 1 | -1 }
+  | { kind: "time"; dir: 1 | -1 }
   | { kind: "snapshot" }
   | { kind: "cursor" }
   | { kind: "cycle"; dir: 1 | -1 };
@@ -117,6 +133,7 @@ export const KEYBOARD_KEYS: { keys: string; action: string; where?: string }[] =
   { keys: "R C B, then Space twice", action: "Ruler, circle (centre, then edge) or rectangle (corner to corner)", where: "keyboard cursor on" },
   { keys: "F, then Space per point", action: "Freehand outline; ⇧↵ or Space on the first point closes it, ⌫ removes the last point", where: "keyboard cursor on" },
   { keys: "N / ⇧N", action: "Select the next / previous annotation and show it" },
+  { keys: "T / ⇧T", action: "Next / previous time point", where: "time series" },
   { keys: "⌥ + arrow", action: "Move the selected annotations (⌥⇧ for bigger steps)" },
   { keys: "F2 or ↵", action: "Rename the selected annotation" },
   { keys: "⇧F10 or the Menu key", action: "Menu for the selection, or at the cursor (style, colour, delete, add pin, zoom…)" },
@@ -154,6 +171,7 @@ export function keyAction(e: KeyLike, ctx: KeyContext = {}): KeyAction | null {
     if (k === "+") return { kind: "zoom", factor: 2 };
     if (k === "s") return { kind: "snapshot" };
     if (k === "n") return { kind: "cycle", dir: -1 };
+    if (k === "t") return { kind: "time", dir: -1 };
     if (k === "_") return { kind: "zoom", factor: 0.5 };
     return null;
   }
@@ -186,6 +204,8 @@ export function keyAction(e: KeyLike, ctx: KeyContext = {}): KeyAction | null {
       return { kind: "cursor" };
     case "n":
       return { kind: "cycle", dir: 1 };
+    case "t":
+      return { kind: "time", dir: 1 };
     case "=":
     case "+":
       return { kind: "zoom", factor: 2 };
@@ -252,6 +272,8 @@ export function runKeyAction(a: KeyAction): boolean {
     case "plane":
       stepPlane(a.dir);
       return true;
+    case "time":
+      return stepTime(a.dir);
     case "snapshot":
       if (!st.slide.info) return false;
       fireMenu("snapshot");

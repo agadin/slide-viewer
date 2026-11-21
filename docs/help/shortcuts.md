@@ -80,6 +80,7 @@ The keyboard cursor is a cross-hair in the middle of the view. You move the slid
 | , / . | Rotate the view 90° left / right |
 | ⇧, / ⇧. | Rotate by the small step (15°) |
 | Page Up / Page Down | Focal plane up / down (z-stacks) |
+| T / ⇧T | Next / previous time point (time series) |
 | Right-click | Menu: add a pin or flag, draw a shape, zoom, rotate |
 
 ## Window and files

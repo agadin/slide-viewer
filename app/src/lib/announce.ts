@@ -181,7 +181,9 @@ export function slideFacts(info: SlideInfo): string {
   const size = `${n(info.width)} by ${n(info.height)} pixels`;
   const cal = info.calibrated ? `${+info.mppX.toFixed(3)} micrometres per pixel` : "uncalibrated, so measurements are in pixels";
   const z = info.zPlanes.length > 1 ? `, ${info.zPlanes.length} focal planes` : "";
-  return `${size}, ${cal}${z}`;
+  const t = (info.timePoints?.length ?? 0) > 1 ? `, ${info.timePoints.length} time points` : "";
+  const ser = (info.series?.length ?? 0) > 1 ? `, ${info.seriesKind.toLowerCase()} ${info.seriesIndex + 1} of ${info.series.length}` : "";
+  return `${size}, ${cal}${z}${t}${ser}`;
 }
 
 export const KEY_HINT =
@@ -260,6 +262,21 @@ export function annotationChangeKind(prev: Store["annotations"], next: Store["an
   if (prev.redo.length && next.items === prev.redo[prev.redo.length - 1] && next.undo.length >= 1) return "redo";
   if (next.undo !== prev.undo && next.undo.length > 0) return "edit";
   return null; // a load / reset
+}
+
+/** "Time point 3 of 10, 1 min 0 s" */
+export function timeMessage(info: Pick<SlideInfo, "timePoints">, t: number): string {
+  const times = info.timePoints ?? [];
+  const i = times.findIndex((p) => p.index === t);
+  if (i < 0 || times.length <= 1) return "";
+  const unit = (n: string, one: string) => `${+n} ${+n === 1 ? one : `${one}s`}`;
+  const spoken = /^T \d+$/.test(times[i].label)
+    ? ""
+    : times[i].label
+        .replace(/([\d.]+) h\b/, (_, n) => unit(n, "hour"))
+        .replace(/([\d.]+) min\b/, (_, n) => unit(n, "minute"))
+        .replace(/([\d.]+) s\b/, (_, n) => unit(n, "second"));
+  return `Time point ${i + 1} of ${times.length}${spoken ? `, ${spoken}` : ""}.`;
 }
 
 /** "Focal plane 3 of 5, +1.2 µm" */
@@ -406,6 +423,12 @@ export function useAnnouncements(): void {
           const m = planeMessage(s.slide.info, s.view.z);
           if (m) announce(m);
         }
+        // time points: not while playing (one message per frame would drown everything else)
+        if (s.view.t !== prev.view.t && !s.view.playing) {
+          const m = timeMessage(s.slide.info, s.view.t);
+          if (m) announce(m);
+        }
+        if (s.view.playing !== prev.view.playing) announce(s.view.playing ? "Playing the time series." : `Paused. ${timeMessage(s.slide.info, s.view.t)}`);
       }
 
       // ---- stain detection (the open summary includes it when it's already known)

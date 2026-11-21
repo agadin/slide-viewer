@@ -5,7 +5,7 @@
  */
 import { useStore } from "../store";
 import { fitSize, slideOverview } from "../backend";
-import type { StainAnalysis } from "../types";
+import { planeKey, type StainAnalysis } from "../types";
 import { analyseRgba, stainLabel } from "./stain";
 import { modeForAnalysis, presetForAnalysis } from "./presets";
 
@@ -22,7 +22,7 @@ export async function ensureAnalysis(force = false): Promise<StainAnalysis> {
   const path = st.slide.path;
   if (!info || !path) throw new Error("No slide is open");
   if (st.filters.analysis && !force) return st.filters.analysis;
-  const z = st.view.z;
+  const z = planeKey(st.view.z, st.view.t);
   if (inflight && inflight.path === path && inflight.z === z && !force) return inflight.p;
   const setAuto = (patch: Partial<typeof st.filters.auto>) => {
     const s = useStore.getState();

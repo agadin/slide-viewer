@@ -102,6 +102,10 @@ export interface ViewSlice {
   rotation: number;
   /** focal plane: a ZPlane.index of the open slide */
   z: number;
+  /** time point: a TimePoint.index of the open slide (0 when it has no time series) */
+  t: number;
+  /** the time series is playing (TimeBar steps `t`) */
+  playing: boolean;
   /** written by the viewer on every viewport change: OSD viewport zoom and µm per screen px */
   zoom: number;
   umPerScreenPx: number | null;
@@ -116,7 +120,7 @@ export interface ViewSlice {
 }
 /** the slide is tipped in 3D (see ViewSlice.tiltX / tiltY) */
 export const isTilted = (v: Pick<ViewSlice, "tiltX" | "tiltY">) => Math.abs(v.tiltX) > 0.05 || Math.abs(v.tiltY) > 0.05;
-const initialView: ViewSlice = { rotation: 0, z: 0, zoom: 1, umPerScreenPx: null, magnification: null, homeNonce: 0, tiltX: 0, tiltY: 0 };
+const initialView: ViewSlice = { rotation: 0, z: 0, t: 0, playing: false, zoom: 1, umPerScreenPx: null, magnification: null, homeNonce: 0, tiltX: 0, tiltY: 0 };
 
 // ---------------------------------------------------------------- ui (shared)
 export type PanelTab = "annotations" | "adjust";
@@ -170,7 +174,8 @@ export interface Store {
   setUi: (p: Partial<UiSlice>) => void;
 
   /** flush pending autosaves etc., then open a slide (resets annotations, view rotation/z and auto results) */
-  openSlide: (path: string) => Promise<void>;
+  /** open a slide; `series` picks an image of a multi-image file (SlideInfo.series), 0 by default */
+  openSlide: (path: string, series?: number) => Promise<void>;
   closeSlide: () => Promise<void>;
   setTool: (tool: Tool) => void;
   select: (ids: string[]) => void;
@@ -216,8 +221,28 @@ export const useStore = create<Store>((set, get) => ({
   setView: (p) => set((s) => ({ view: { ...s.view, ...p } })),
   setUi: (p) => set((s) => ({ ui: { ...s.ui, ...p } })),
 
-  openSlide: async (path) => {
+  openSlide: async (path, series = 0) => {
     await get().flushAll();
+    // another image of the same file (Image / Position picker): keep the annotations and the view's
+    // rotation; the annotations belong to the file
+    const prev = get().slide.path === path ? get().slide.info : null;
+    if (prev && prev.seriesIndex !== series) {
+      set((s) => ({ slide: { ...s.slide, loading: true, error: null } }));
+      try {
+        const info = await backend.openSlide(path, series);
+        backendOpen.add(info.id);
+        if (get().slide.path === path)
+          set((s) => ({
+            slide: { ...s.slide, info, loading: false, openNonce: s.slide.openNonce + 1 },
+            view: { ...s.view, z: 0, playing: false, t: Math.min(s.view.t, Math.max(0, info.timePoints.length - 1)) },
+            filters: { ...s.filters, auto: initialAuto, analysis: null },
+          }));
+      } catch (e) {
+        if (get().slide.path === path) set((s) => ({ slide: { ...s.slide, info: prev, loading: false }, ui: { ...s.ui, toast: { text: String(e), kind: "error" } } }));
+      }
+      releaseHidden(get().slide.info?.id ?? null, get().slide.loading);
+      return;
+    }
     set((s) => ({
       slide: { ...s.slide, path, info: null, loading: true, error: null },
       annotations: { ...initialAnnotations, tool: s.annotations.tool },

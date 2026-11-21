@@ -71,6 +71,15 @@ Some slides are scanned at several focus depths (a *z-stack*), so you can focus 
 
 Slides with a single plane don't show the slider.
 
+## Time series and multi-image files
+
+Microscope files (Leica `.lif`, Olympus `.oir`, Nikon `.nd2`) can hold more than one picture. A bar appears at the bottom of the slide when the open file needs it; ordinary slides never show it.
+
+- **Time series** (a recording over time): drag the time slider, click ◀ / ▶▏, or press **T** for the next time point and **⇧T** for the previous one. **▶** plays the series in a loop and **❚❚** pauses it. The time since the start is shown when the file records it (otherwise *T 1*, *T 2*, …). Focus, zoom and adjustments stay as they are while you step through time.
+- **Several images or positions**: a Leica `.lif` can hold several images, and a Nikon `.nd2` can be recorded at several stage positions. Pick one from the **Image** or **Position** list. The file opens at its largest image (or first position).
+
+Pins and shapes belong to the file, not to one time point or image, so they stay where they are when you switch.
+
 ## Snapshot
 
 To save what you see as a picture (for notes or a report), press **⇧⌘S** or **⇧S**, click the camera button, or choose **File ▸ Save Snapshot (PNG)…**.
@@ -98,4 +107,5 @@ The picture uses your current [adjustments](adjustments-and-stains.md) and rotat
 | **,** / **.** | Rotate 90° left / right |
 | **⇧,** / **⇧.** | Rotate by the small step |
 | **Page Up** / **Page Down** | Focal plane up / down |
+| **T** / **⇧T** | Next / previous time point (time series) |
 | **⇧S** or **⇧⌘S** | Save a snapshot |

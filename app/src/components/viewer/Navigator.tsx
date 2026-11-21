@@ -11,6 +11,7 @@
  * The card can be moved (drag its top grip) and resized (drag its bottom-right corner); both are
  * remembered in settings.viewer.navPos / navSize. Double-click the grip to put it back.
  */
+import { planeKey } from "../../lib/types";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import OpenSeadragon from "openseadragon";
 import { useViewer, useViewerFrame } from "../../lib/viewerContext";
@@ -48,7 +49,7 @@ export function Navigator() {
   const pos = livePos ?? savedPos ?? NAV_DEFAULT_POS;
   const cardRef = useRef<HTMLDivElement>(null);
   const rotation = useStore((s) => s.view.rotation);
-  const z = useStore((s) => s.view.z);
+  const z = useStore((s) => planeKey(s.view.z, s.view.t));
   const items = useStore((s) => s.annotations.items);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [img, setImg] = useState<HTMLImageElement | null>(null);

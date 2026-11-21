@@ -14,7 +14,7 @@ Everything you can do with the mouse also works from the keyboard. **Tab** moves
 
 **Open a folder and a slide.** Press **⌘O** (Ctrl+O on Windows), or Tab to **Choose Folder…** and press **↵**. In the slide list, **↑** and **↓** move, **→** and **←** open and close folders, and **↵** opens a slide. See [Browsing a folder of slides](browser.md#keyboard).
 
-**Move around the slide.** Tab to the slide. Then **+** and **−** zoom, **H** fits the whole slide, **,** and **.** rotate, **Page Up** and **Page Down** change the focal plane, and **[** and **]** go to the previous or next slide.
+**Move around the slide.** Tab to the slide. Then **+** and **−** zoom, **H** fits the whole slide, **,** and **.** rotate, **Page Up** and **Page Down** change the focal plane, **T** and **⇧T** step through a time series, and **[** and **]** go to the previous or next slide.
 
 **Use the keyboard cursor.** Press **X** (or **↵** on the slide) to show a cross-hair in the middle of the view. The arrow keys now move the slide under the cross-hair, a tenth of the view at a time (**⇧** + arrow moves a quarter). Whatever you do next happens at the cross-hair:
 

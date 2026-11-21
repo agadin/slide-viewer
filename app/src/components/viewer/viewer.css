@@ -369,3 +369,56 @@
   left: var(--side-w, 0px);
   right: var(--panel-w, 0px);
 }
+
+/* ---------- time series / image picker, bottom edge (TimeBar.tsx); only when the file needs it ---------- */
+.sv-timebar {
+  position: absolute;
+  z-index: 5;
+  bottom: calc(var(--ledger-h, 0px) + 2 * var(--gap, 10px));
+  left: calc(var(--side-w, 0px) + (100% - var(--side-w, 0px) - var(--panel-w, 0px)) / 2);
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: min(640px, calc(100% - var(--side-w, 0px) - var(--panel-w, 0px) - 2 * var(--gap, 10px)));
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font: 500 calc(12px * var(--ts, 1))/1 var(--mono);
+  color: var(--tx-2);
+}
+.sv-timebar.above-tools {
+  bottom: calc(var(--ledger-h, 0px) + var(--tool-h, 40px) + 3 * var(--gap, 10px));
+}
+.sv-timebar .series {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.sv-timebar select {
+  max-width: 220px;
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+.sv-timebar .series + .tbtn {
+  margin-left: 6px;
+}
+.sv-timebar input[type="range"] {
+  flex: 1 1 200px;
+  min-width: 80px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.sv-timebar .tbtn {
+  height: 24px;
+  padding: 0 7px;
+}
+.sv-timebar .tlabel {
+  min-width: 56px;
+  max-width: 110px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--tx-1);
+}

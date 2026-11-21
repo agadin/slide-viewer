@@ -9,7 +9,7 @@
  *    helpers and `onFrame`,
  *  - mounts the plug-in points below; their owners fill them in without touching this file:
  *      <AnnotationLayer/> (annotations), useFilterPipeline + filterViewerOptions (filters),
- *      <Navigator/> <ScaleBar/> <ZoomPresets/> <ZSlider/> <Snapshot/> (viewer).
+ *      <Navigator/> <ScaleBar/> <ZoomPresets/> <ZSlider/> <TimeBar/> <Snapshot/> (viewer).
  *
  * Design notes (viewer builder):
  *  - One OSD viewer per open slide: it is created when `slide.info` changes and destroyed (tiles,
@@ -31,10 +31,11 @@ import { tileUrl } from "../lib/backend";
 import { magFromUmPerPx } from "../lib/coords";
 import { ViewerContext, type ViewerContextValue } from "../lib/viewerContext";
 import { filterViewerOptions, useFilterPipeline } from "../lib/filters/pipeline";
-import type { SlideInfo } from "../lib/types";
+import { planeKey, type SlideInfo } from "../lib/types";
 import { AnnotationLayer } from "./annotations/AnnotationLayer";
 import { Navigator } from "./viewer/Navigator";
 import { ScaleBar } from "./viewer/ScaleBar";
+import { TimeBar } from "./viewer/TimeBar";
 import { ZoomPresets } from "./viewer/ZoomPresets";
 import { ZSlider } from "./viewer/ZSlider";
 import { Snapshot } from "./viewer/Snapshot";
@@ -110,7 +111,8 @@ export function SlideViewer() {
   const error = useStore((s) => s.slide.error);
   const loading = useStore((s) => s.slide.loading);
   const rotation = useStore((s) => s.view.rotation);
-  const z = useStore((s) => s.view.z);
+  // what the tiles show: focal plane + time point (types.ts planeKey); a change of either fades in
+  const z = useStore((s) => planeKey(s.view.z, s.view.t));
   const homeNonce = useStore((s) => s.view.homeNonce);
   const vs = useViewerSettings(); // a11y(visual): animate is off while Reduce motion is on
 
@@ -333,6 +335,7 @@ export function SlideViewer() {
             <ScaleBar />
             <ZoomPresets />
             <ZSlider />
+            <TimeBar />
             <Snapshot />
           </>
         )}

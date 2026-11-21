@@ -20,6 +20,19 @@ export interface ZPlane {
   label: string;
 }
 
+/** One time point of a time series. `index` goes into the tile z as `index * T_STRIDE` (planeKey). */
+export interface TimePoint {
+  index: number;
+  /** seconds since the start (null when the file doesn't say) */
+  seconds: number | null;
+  /** "12.5 s", "2 min 5 s" or "T 3" */
+  label: string;
+}
+
+/** tile z = focal plane + time point × T_STRIDE (src-tauri/src/source/mod.rs `split_z`) */
+export const T_STRIDE = 65536;
+export const planeKey = (z: number, t: number) => z + t * T_STRIDE;
+
 /** `open_slide` result. Coordinates: level-0 image pixels; nm via lib/coords.ts. */
 export interface SlideInfo {
   /** registry id; tile URLs use it */
@@ -46,6 +59,14 @@ export interface SlideInfo {
   zPlanes: ZPlane[];
   /** associated image names ("thumbnail", "macro", "label") */
   associated: string[];
+  /** time points (more than one: the time slider shows); empty when the file has no time series */
+  timePoints: TimePoint[];
+  /** the images of a multi-image file (a .lif's images, an .nd2's stage positions); empty when one */
+  series: string[];
+  /** which of `series` this is (open_slide's `series`) */
+  seriesIndex: number;
+  /** what an entry of `series` is called: "Image" or "Position" */
+  seriesKind: string;
 }
 
 // ---------------------------------------------------------------- folder browser (mirrors src-tauri/src/scan.rs)

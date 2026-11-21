@@ -62,6 +62,9 @@ test("a11y audit: no key does two things", () => {
   ok(!TOOLS.some((t) => ["x", "n", "m", "h"].includes(t.key)), "no tool key reuses X, N, M or H");
   eq(keyAction({ key: "N", shiftKey: true }), { kind: "cycle", dir: -1 }, "⇧N steps back");
   eq(keyAction({ key: "P", shiftKey: true }), null, "⇧P is left to the keyboard cursor (flag)");
+  eq(keyAction({ key: "t" }), { kind: "time", dir: 1 }, "T steps to the next time point");
+  eq(keyAction({ key: "T", shiftKey: true }), { kind: "time", dir: -1 }, "⇧T steps back in time");
+  ok(!TOOLS.some((t) => t.key === "t"), "no tool uses T");
 });
 
 test("a11y audit: help pages document keyboard and screen-reader use", () => {

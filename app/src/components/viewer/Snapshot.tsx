@@ -20,7 +20,7 @@ import { basename, dirname, hasTauri, joinPath, pickSavePath, savePng, slideRegi
 import { applyFiltersToCanvas } from "../../lib/filters/pipeline";
 import { paintAnnotations } from "../../lib/annotations";
 import type { ViewerCoords } from "../../lib/viewerContext";
-import type { SlideInfo } from "../../lib/types";
+import { planeKey, type SlideInfo } from "../../lib/types";
 import type OpenSeadragon from "openseadragon";
 import { Modal } from "../Modal";
 import { Check, Seg } from "../prefsUi";
@@ -92,7 +92,7 @@ export async function renderSnapshot(
     const ow = Math.max(1, Math.round((x1 - x0) * reg.outPerImagePx));
     const oh = Math.max(1, Math.round((y1 - y0) * reg.outPerImagePx));
     try {
-      const png = await slideRegion(info.id, { x: x0, y: y0, width: x1 - x0, height: y1 - y0, outWidth: ow, outHeight: oh, z: st.view.z }, "png");
+      const png = await slideRegion(info.id, { x: x0, y: y0, width: x1 - x0, height: y1 - y0, outWidth: ow, outHeight: oh, z: planeKey(st.view.z, st.view.t) }, "png");
       const bmp = await loadBitmap(png);
       let src: HTMLCanvasElement = document.createElement("canvas");
       src.width = bmp.width;
