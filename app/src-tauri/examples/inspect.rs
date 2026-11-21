@@ -5,10 +5,29 @@
 //! not blank background; the brightest part on a dark fluorescence image), <name>-thumb.png (what
 //! the folder browser shows) and <name>-assoc-<name>.png per associated image, and prints the
 //! backend's info.
+//! Environment: `SERIES=n` opens image (or stage position) n of a multi-image file, `T=n` shows
+//! time point n and `Z=n` focal plane n (a `ZPlane::index`); the file names then carry
+//! `-s<n>-t<n>-z<n>` for whichever is set.
 use std::path::Path;
 
 use app_lib::scan::render_thumbnail;
-use app_lib::source::{encode_png, open_source};
+use app_lib::source::{encode_png, open_source, T_STRIDE};
+
+fn env_u32(k: &str) -> Option<u32> {
+    std::env::var(k).ok().map(|v| v.parse().expect("SERIES, T and Z are whole numbers"))
+}
+
+/// (series, tile z, file-name suffix) from SERIES / T / Z.
+fn selection() -> (u32, u32, String) {
+    let (s, t, z) = (env_u32("SERIES"), env_u32("T"), env_u32("Z"));
+    let mut tag = String::new();
+    for (k, v) in [("s", s), ("t", t), ("z", z)] {
+        if let Some(v) = v {
+            tag.push_str(&format!("-{k}{v}"));
+        }
+    }
+    (s.unwrap_or(0), z.unwrap_or(0) + t.unwrap_or(0) * T_STRIDE, tag)
+}
 
 fn save(dir: &Path, name: &str, what: &str, img: &image::RgbImage) -> Result<(), String> {
     let p = dir.join(format!("{name}-{what}.png"));
@@ -18,11 +37,12 @@ fn save(dir: &Path, name: &str, what: &str, img: &image::RgbImage) -> Result<(),
 }
 
 fn run(path: &str, out: &Path) -> Result<(), String> {
-    let src = open_source(path, 0)?;
+    let (series, z, tag) = selection();
+    let src = open_source(path, series)?;
     let info = src.info().clone();
     println!("{path}: {}", serde_json::to_string(&info).map_err(|e| e.to_string())?);
-    let name = Path::new(path).file_name().unwrap().to_string_lossy().to_string();
-    let o = src.overview(1024, 0)?;
+    let name = format!("{}{tag}", Path::new(path).file_name().unwrap().to_string_lossy());
+    let o = src.overview(1024, z)?;
     save(out, &name, "overview", &o)?;
     // densest tissue: the darkest 16x16 block of the overview (stain on a white background), or the
     // brightest one when the background is dark (fluorescence)
@@ -52,7 +72,7 @@ fn run(path: &str, out: &Path) -> Result<(), String> {
     let side = 1024i64.min(info.width).min(info.height);
     let (x0, y0) = ((cx - side / 2).clamp(0, info.width - side), (cy - side / 2).clamp(0, info.height - side));
     println!("  tissue region at level-0 ({x0}, {y0}) size {side}");
-    let t = src.region(x0, y0, side, side, side as u32, side as u32, 0)?;
+    let t = src.region(x0, y0, side, side, side as u32, side as u32, z)?;
     save(out, &name, "tissue", &t)?;
     save(out, &name, "thumb", &render_thumbnail(&*src, 256)?)?;
     for a in &info.associated {
@@ -66,10 +86,11 @@ fn run(path: &str, out: &Path) -> Result<(), String> {
 
 /// `<name>-region-x-y-w-h.png`: level-0 rectangle (x, y, w, h) scaled to fit 1024 px.
 fn region(path: &str, out: &Path, r: &[i64]) -> Result<(), String> {
-    let src = open_source(path, 0)?;
+    let (series, z, tag) = selection();
+    let src = open_source(path, series)?;
     let (ow, oh) = app_lib::source::fit(r[2], r[3], 1024);
-    let img = src.region(r[0], r[1], r[2], r[3], ow, oh, 0)?;
-    let name = Path::new(path).file_name().unwrap().to_string_lossy().to_string();
+    let img = src.region(r[0], r[1], r[2], r[3], ow, oh, z)?;
+    let name = format!("{}{tag}", Path::new(path).file_name().unwrap().to_string_lossy());
     save(out, &name, &format!("region-{}-{}-{}-{}", r[0], r[1], r[2], r[3]), &img)
 }
 

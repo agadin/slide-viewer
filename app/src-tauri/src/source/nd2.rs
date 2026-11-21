@@ -9,7 +9,8 @@
 //!     components per pixel, bits per component, frame count, compression, pixel type;
 //!   - `ImageCalibrationLV|0!` (or XML `ImageCalibration|0!`): µm per pixel;
 //!   - `ImageMetadataLV!` (or XML `ImageMetadata!`): the experiment, a nest of loops (time,
-//!     XY positions, Z, channels) that says how frame numbers map to Z;
+//!     XY positions, Z, channels) that says how frame numbers map to time point, stage position
+//!     and Z (`LoopNest`), with the time intervals and the positions' names;
 //!   - `ImageMetadataSeqLV|0!` (or XML `ImageMetadataSeq|0!`): the channels (name, colour,
 //!     emission spectrum);
 //!   - `CustomData|Z!`: the Z position of every frame (f64 µm), when recorded;
@@ -24,12 +25,16 @@
 //! Layout as described by the open-source readers `nd2` (Python, BSD), `nd2-rs` and
 //! `openreadout-nd2` (MIT/Apache); this is an independent implementation.
 //!
-//! Display: ND2 frames are flat, so each focal plane becomes a Deep-Zoom pyramid (`pyramid.rs`),
-//! built on first use in memory, or on disk in the app cache for big stitched images. RGB
-//! (brightfield camera) images are shown as they are; a single 8-bit channel as grey; other
-//! channels are stretched (0.5 → 99.8 % of the in-focus plane, one stretch for all planes) and
-//! added in the colour of their emission wavelength (or the colour saved in the file). Only the
-//! first time point and the first XY position are shown.
+//! Display: ND2 frames are flat, so each (time point, focal plane) becomes a Deep-Zoom pyramid
+//! (`pyramid.rs`), built on first use in memory, or on disk in the app cache for big stitched
+//! images. RGB (brightfield camera) images are shown as they are; a single 8-bit channel as grey;
+//! other channels are stretched (0.5 → 99.8 % of the in-focus plane at the first time point, one
+//! stretch for all planes and times) and added in the colour of their emission wavelength (or the
+//! colour saved in the file).
+//!
+//! Each XY stage position is a series (`open_series`), named as in the experiment. Time points
+//! are labelled from the timestamp that starts each frame (legacy: `dTimeMSec`), else from the
+//! loop's interval.
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -43,7 +48,7 @@ use super::cache::{cache_dir, file_key};
 use super::plain::{MAX_PIXELS, MAX_PLAUSIBLE_MPP, MEM_PIXELS};
 use super::pyramid::{Canvas, Pyramid};
 use super::vsi::{auto_range, composite, decode_j2k_samples, wavelength_rgb, ChanLook};
-use super::{dz_max_level, dz_tile_rect, fit, make_planes, LevelInfo, SlideSource, SourceInfo, TILE_SIZE};
+use super::{dz_max_level, dz_tile_rect, fit, make_planes, make_time_points, split_z, LevelInfo, SlideSource, SourceInfo, TILE_SIZE};
 
 /// Chunk header magic (little-endian on disk: `DA CE BE 0A`).
 pub const CHUNK_MAGIC: u32 = 0x0ABE_CEDA;
@@ -58,6 +63,8 @@ const MEM_PLANE_BUDGET: u64 = 384 << 20;
 const RENDER_VERSION: u32 = 1;
 /// Disk pyramids kept in the cache (oldest are removed).
 const KEEP_DISK: usize = 6;
+/// Disk pyramids kept per file (planes × time points × positions; least recently used go).
+const KEEP_PLANES: usize = 24;
 /// Largest decompressed frame we hold in memory (zlib frames are decompressed whole).
 const MAX_FRAME_BYTES: u64 = 4 << 30;
 /// Samples per channel used to measure the stretch.
@@ -578,13 +585,18 @@ pub const LOOP_SPECTRAL: i64 = 6;
 pub const LOOP_NE_TIME: i64 = 8;
 
 /// One loop of the experiment that produces frames.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Loop {
     pub kind: i64,
     pub count: usize,
     /// Z loops: the step (µm) and whether the stack runs top to bottom
     pub step_um: Option<f64>,
     pub inverted: bool,
+    /// time loops: (time points, interval in ms) per phase, in order (one phase for a plain
+    /// time loop); empty when the interval isn't known
+    pub periods: Vec<(usize, f64)>,
+    /// XY loops: the names of the (valid) positions, `count` of them, or empty
+    pub names: Vec<String>,
 }
 
 fn is_experiment(v: &Var) -> bool {
@@ -624,20 +636,165 @@ pub fn loops_from(exp: &Var) -> Vec<Loop> {
             }
             let pars = e.get("uLoopPars")?;
             let mut count = pars.num_at("uiCount").unwrap_or(1.0).max(1.0) as usize;
-            if kind == LOOP_XY
-                && let Some(Var::Bytes(valid)) = e.get("pItemValid")
-                && valid.len() == count
-            {
-                count = valid.iter().filter(|&&b| b != 0).count().max(1);
+            let mut names = Vec::new();
+            if kind == LOOP_XY {
+                // modern: Points/<n>/dPosName; older: a list of names
+                let mut found = Vec::new();
+                pars.find_all("dPosName", &mut found);
+                pars.find_all("pPosName", &mut found);
+                for v in found {
+                    match v {
+                        Var::Str(s) => names.push(s.trim().to_string()),
+                        Var::Level(c) => names.extend(c.iter().filter_map(|(_, s)| s.text()).map(|s| s.trim().to_string())),
+                        _ => {}
+                    }
+                }
+                if let Some(valid) = validity(e.get("pItemValid")).filter(|v| v.len() == count) {
+                    if names.len() == count {
+                        names = names.into_iter().zip(&valid).filter(|(_, ok)| **ok).map(|(n, _)| n).collect();
+                    }
+                    count = valid.iter().filter(|&&b| b).count().max(1);
+                }
+                if names.len() != count {
+                    names.clear();
+                }
             }
             let (step_um, inverted) = if kind == LOOP_Z {
                 (pars.num_at("dZStep").filter(|s| s.is_finite() && *s != 0.0).map(f64::abs), pars.num_at("bZInverted").is_some_and(|b| b != 0.0))
             } else {
                 (None, false)
             };
-            Some(Loop { kind, count, step_um, inverted })
+            let periods = match kind {
+                LOOP_TIME => {
+                    // the measured mean interval, else the one asked for
+                    let p = pars.num_at("dAvgPeriodDiff").filter(|p| p.is_finite() && *p > 0.0).or_else(|| pars.num_at("dPeriod").filter(|p| p.is_finite() && *p > 0.0));
+                    p.map(|p| vec![(count, p)]).unwrap_or_default()
+                }
+                LOOP_NE_TIME => ne_periods(pars),
+                _ => vec![],
+            };
+            Some(Loop { kind, count, step_um, inverted, periods, names })
         })
         .collect()
+}
+
+/// Per-item flags (`pItemValid`, `pPeriodValid`): bytes, or a list of booleans.
+fn validity(v: Option<&Var>) -> Option<Vec<bool>> {
+    match v? {
+        Var::Bytes(b) if !b.is_empty() => Some(b.iter().map(|&x| x != 0).collect()),
+        Var::Level(c) if !c.is_empty() => c.iter().map(|(_, x)| x.num().map(|n| n != 0.0)).collect(),
+        _ => None,
+    }
+}
+
+/// The phases of an NE time loop (`pPeriod`, the valid ones): (time points, interval ms).
+/// Empty when any interval is unknown.
+fn ne_periods(pars: &Var) -> Vec<(usize, f64)> {
+    let Some(pp) = pars.find("pPeriod") else { return vec![] };
+    let phases: Vec<&Var> = pp.children().iter().map(|(_, v)| v).filter(|v| matches!(v, Var::Level(_))).collect();
+    let valid = validity(pars.find("pPeriodValid")).filter(|v| v.len() == phases.len());
+    let mut out = Vec::new();
+    for (k, ph) in phases.into_iter().enumerate() {
+        if valid.as_ref().is_some_and(|v| !v[k]) {
+            continue;
+        }
+        let n = ph.get("uiCount").and_then(Var::num).unwrap_or(0.0) as usize;
+        let p = ph.get("dAvgPeriodDiff").and_then(Var::num).filter(|p| p.is_finite() && *p > 0.0).or_else(|| ph.get("dPeriod").and_then(Var::num));
+        match p.filter(|p| p.is_finite() && *p > 0.0) {
+            Some(p) if n > 0 => out.push((n, p)),
+            _ => return vec![],
+        }
+    }
+    out
+}
+
+/// The axes the viewer shows: time, XY stage position, Z.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Axis {
+    Time,
+    Xy,
+    Z,
+}
+
+fn axis_of(kind: i64) -> Option<Axis> {
+    match kind {
+        LOOP_TIME | LOOP_NE_TIME => Some(Axis::Time),
+        LOOP_XY => Some(Axis::Xy),
+        LOOP_Z => Some(Axis::Z),
+        _ => None,
+    }
+}
+
+/// How frame numbers follow from the loops: frame = Σ index × stride, the innermost loop
+/// varying fastest. The first loop of each axis is that axis; any other loop (another of the
+/// same kind, or one we don't know) stays at its first item.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LoopNest {
+    /// the loops, outermost first, their counts cut to the frames that exist (an interrupted
+    /// acquisition keeps only whole iterations)
+    pub loops: Vec<Loop>,
+    /// frames between successive items of each loop
+    pub strides: Vec<usize>,
+}
+
+impl LoopNest {
+    pub fn new(loops: &[Loop], frames: usize) -> LoopNest {
+        let strides: Vec<usize> = (0..loops.len()).map(|k| loops[k + 1..].iter().map(|l| l.count.max(1)).product::<usize>().max(1)).collect();
+        let loops = loops.iter().zip(&strides).map(|(l, s)| Loop { count: l.count.min(frames / s).max(1), ..l.clone() }).collect();
+        LoopNest { loops, strides }
+    }
+
+    /// The loop that is this axis.
+    pub fn axis(&self, a: Axis) -> Option<usize> {
+        self.loops.iter().position(|l| axis_of(l.kind) == Some(a))
+    }
+
+    /// Items along an axis (1 when the experiment has no such loop).
+    pub fn count(&self, a: Axis) -> usize {
+        self.axis(a).map_or(1, |k| self.loops[k].count)
+    }
+
+    /// The frame-number offset of item `i` along an axis.
+    pub fn offset(&self, a: Axis, i: usize) -> usize {
+        self.axis(a).map_or(0, |k| i * self.strides[k])
+    }
+
+    /// The frame of (position, time point, plane in loop order).
+    pub fn frame(&self, xy: usize, t: usize, z: usize) -> usize {
+        self.offset(Axis::Xy, xy) + self.offset(Axis::Time, t) + self.offset(Axis::Z, z)
+    }
+}
+
+/// Seconds since the first time point, for `n` time points: from the frames' timestamps (ms,
+/// the first frame of each time point) when they rise steadily, else from the loop's intervals,
+/// else unknown.
+pub fn time_seconds(stamps_ms: &[Option<f64>], time_loop: Option<&Loop>, n: usize) -> Vec<Option<f64>> {
+    let stamps: Option<Vec<f64>> = stamps_ms.iter().map(|s| s.filter(|v| v.is_finite())).collect();
+    if let Some(s) = stamps.filter(|s| s.len() == n && n > 1)
+        && s.windows(2).all(|w| w[1] >= w[0])
+        && s[n - 1] > s[0]
+    {
+        return s.iter().map(|v| Some((v - s[0]) / 1000.0)).collect();
+    }
+    let periods = time_loop.map(|l| l.periods.as_slice()).unwrap_or(&[]);
+    if periods.is_empty() {
+        return vec![None; n];
+    }
+    // phase k's interval applies to its time points after the first one overall
+    let mut out = Vec::with_capacity(n);
+    let (mut t, mut phase, mut left) = (0.0, 0usize, periods[0].0);
+    for i in 0..n {
+        if i > 0 {
+            while left == 0 && phase + 1 < periods.len() {
+                phase += 1;
+                left = periods[phase].0;
+            }
+            t += periods[phase].1;
+        }
+        left = left.saturating_sub(1);
+        out.push(Some(t / 1000.0));
+    }
+    out
 }
 
 /// How focal planes sit among the frames: plane k (loop order) is frame `k * stride`.
@@ -651,14 +808,17 @@ pub struct ZLayout {
 
 /// The Z loop's place among `frames` frames (one plane when there is no usable Z loop).
 pub fn z_layout(loops: &[Loop], frames: usize) -> ZLayout {
+    z_layout_of(&LoopNest::new(loops, frames))
+}
+
+fn z_layout_of(nest: &LoopNest) -> ZLayout {
     let single = ZLayout { count: 1, stride: 1, step_um: None, inverted: false };
-    let Some(k) = loops.iter().position(|l| l.kind == LOOP_Z) else { return single };
-    let stride: usize = loops[k + 1..].iter().map(|l| l.count).product::<usize>().max(1);
-    let count = loops[k].count.min(frames / stride);
-    if count <= 1 {
+    let Some(k) = nest.axis(Axis::Z) else { return single };
+    let l = &nest.loops[k];
+    if l.count <= 1 {
         return single;
     }
-    ZLayout { count, stride, step_um: loops[k].step_um, inverted: loops[k].inverted }
+    ZLayout { count: l.count, stride: nest.strides[k], step_um: l.step_um, inverted: l.inverted }
 }
 
 /// Z of each plane (µm, loop order): from the per-frame positions when the file has them
@@ -877,8 +1037,13 @@ pub struct Nd2Source {
     path: String,
     info: SourceInfo,
     frames: Frames,
-    /// for each z position (slider order), its sequence index
+    /// the XY position shown (`SourceInfo::series_index`)
+    series: usize,
+    /// for each z position (slider order), its sequence index at the first time point (this
+    /// XY position's frames)
     z_frames: Vec<usize>,
+    /// for each time point, what it adds to the sequence index
+    t_frames: Vec<usize>,
     /// for each ZPlane::index, its z position
     plane_pos: Vec<usize>,
     nominal: usize,
@@ -895,9 +1060,26 @@ pub struct Nd2Source {
 
 #[derive(Default)]
 struct PlaneCache {
-    /// z position → (pyramid, bytes in memory, last use)
-    map: HashMap<usize, (Arc<Pyramid>, u64, u64)>,
+    /// (time point, z position) → (pyramid, bytes in memory, last use)
+    map: HashMap<(usize, usize), (Arc<Pyramid>, u64, u64)>,
     clock: u64,
+}
+
+/// Frame size, components, depth and calibration, as either container gives them.
+struct Geometry {
+    w: u32,
+    h: u32,
+    comps: usize,
+    bits: u32,
+    mpp: Option<(f64, f64)>,
+}
+
+/// What maps (position, time, plane) to frames, and each frame's time (ms) by sequence index.
+struct LoopMeta<'a> {
+    loops: &'a [Loop],
+    n_frames: usize,
+    frame_z: &'a [f64],
+    stamp: &'a mut dyn FnMut(usize) -> Option<f64>,
 }
 
 fn mpp_plausible(m: f64) -> bool {
@@ -905,27 +1087,25 @@ fn mpp_plausible(m: f64) -> bool {
 }
 
 impl Nd2Source {
-    /// Image number `series` of the file (`SourceInfo::series`). TODO(series): only 0 so far.
+    /// XY stage position number `series` of the file (`SourceInfo::series`; 0 is the first).
     pub fn open_series(path: &str, series: u32) -> Result<Nd2Source, String> {
-        if series != 0 {
-            return Err(format!("{path}: image {series} not found"));
-        }
-        Self::open(path)
-    }
-
-    pub fn open(path: &str) -> Result<Nd2Source, String> {
         let mut f = File::open(path).map_err(|e| format!("{path}: {e}"))?;
         let head = read_exact_at(&mut f, 0, 12).map_err(|e| format!("{path}: {e}"))?;
+        let series = series as usize;
         if u32_at(&head, 0) == Some(CHUNK_MAGIC) {
-            Self::open_modern(path, &mut f)
+            Self::open_modern(path, &mut f, series)
         } else if head == JP2_SIGNATURE {
-            Self::open_legacy(path, &mut f)
+            Self::open_legacy(path, &mut f, series)
         } else {
             Err(format!("{path}: not an ND2 file"))
         }
     }
 
-    fn open_modern(path: &str, f: &mut File) -> Result<Nd2Source, String> {
+    pub fn open(path: &str) -> Result<Nd2Source, String> {
+        Self::open_series(path, 0)
+    }
+
+    fn open_modern(path: &str, f: &mut File, series: usize) -> Result<Nd2Source, String> {
         let map = read_chunk_map(f).map_err(|e| format!("{path}: {e}"))?;
         let mut chunk = |names: &[&str]| -> Option<Vec<u8>> {
             let (pos, len) = names.iter().find_map(|n| map.get(*n))?;
@@ -964,11 +1144,21 @@ impl Nd2Source {
         let channels = seq0.as_ref().map(channels_from).unwrap_or_default();
         let loops = exp.as_ref().map(loops_from).unwrap_or_default();
         let (w, h, comps, bits) = (attrs.width, attrs.height, attrs.comps, attrs.bits_in_memory);
-        let src = Frames::Modern { attrs, frames };
-        Self::finish(path, src, w, h, comps, bits, mpp.map(|m| (m, m * aspect)), channels, &loops, n_frames, &frame_z)
+        // each frame starts with its acquisition time (f64 ms)
+        let mut stamp = |seq: usize| -> Option<f64> {
+            let (pos, len) = frames.get(seq).copied().flatten()?;
+            if len < 8 {
+                return None;
+            }
+            read_exact_at(f, pos, 8).ok().map(|b| f64::from_le_bytes(b.try_into().unwrap()))
+        };
+        let g = Geometry { w, h, comps, bits, mpp: mpp.map(|m| (m, m * aspect)) };
+        let meta = LoopMeta { loops: &loops, n_frames, frame_z: &frame_z, stamp: &mut stamp };
+        let src = Frames::Modern { attrs, frames: frames.clone() };
+        Self::finish(path, src, g, channels, meta, series)
     }
 
-    fn open_legacy(path: &str, f: &mut File) -> Result<Nd2Source, String> {
+    fn open_legacy(path: &str, f: &mut File, series: usize) -> Result<Nd2Source, String> {
         let boxes = jp2_boxes(f).map_err(|e| format!("{path}: {e}"))?;
         let streams: Vec<(u64, u64)> = boxes.iter().filter(|b| &b.0 == b"jp2c").map(|b| (b.1, b.2)).collect();
         if streams.is_empty() {
@@ -992,24 +1182,16 @@ impl Nd2Source {
         let loops = x.experiment.as_ref().map(loops_from).unwrap_or_default();
         let frame_z: Vec<f64> = x.seq.iter().map(|s| s.num_at("dZPos").unwrap_or(f64::NAN)).collect();
         let bits = if s0.max > 255.0 { 16 } else { 8 };
+        let mut stamp = |seq: usize| x.seq.get(seq).and_then(|s| s.num_at("dTimeMSec"));
+        let g = Geometry { w: s0.w, h: s0.h, comps, bits, mpp: x.calibration.map(|m| (m, m)) };
+        let meta = LoopMeta { loops: &loops, n_frames, frame_z: &frame_z, stamp: &mut stamp };
         let src = Frames::Legacy { streams, per_frame, width: s0.w, height: s0.h };
-        Self::finish(path, src, s0.w, s0.h, comps, bits, x.calibration.map(|m| (m, m)), channels, &loops, n_frames, &frame_z)
+        Self::finish(path, src, g, channels, meta, series)
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn finish(
-        path: &str,
-        frames: Frames,
-        w: u32,
-        h: u32,
-        comps: usize,
-        bits: u32,
-        mpp: Option<(f64, f64)>,
-        mut channels: Vec<ChanMeta>,
-        loops: &[Loop],
-        n_frames: usize,
-        frame_z: &[f64],
-    ) -> Result<Nd2Source, String> {
+    fn finish(path: &str, frames: Frames, g: Geometry, mut channels: Vec<ChanMeta>, meta: LoopMeta, series: usize) -> Result<Nd2Source, String> {
+        let Geometry { w, h, comps, bits, mpp } = g;
+        let LoopMeta { loops, n_frames, frame_z, stamp } = meta;
         if w as u64 * h as u64 > MAX_PIXELS {
             return Err(format!("{path}: image too large ({w} × {h})"));
         }
@@ -1022,9 +1204,24 @@ impl Nd2Source {
             channels.truncate(comps);
         }
 
+        // XY positions: one source each
+        let nest = LoopNest::new(loops, n_frames);
+        let n_pos = nest.count(Axis::Xy);
+        if series >= n_pos {
+            return Err(format!("{path}: stage position {} not found (the file has {n_pos})", series + 1));
+        }
+        let base = nest.frame(series, 0, 0);
+
+        // time points: the first frame of each, this position
+        let nt = nest.count(Axis::Time);
+        let t_frames: Vec<usize> = (0..nt).map(|t| nest.offset(Axis::Time, t)).collect();
+        let time_loop = nest.axis(Axis::Time).map(|k| &nest.loops[k]);
+        let stamps: Vec<Option<f64>> = if nt > 1 { t_frames.iter().map(|o| stamp(base + o)).collect() } else { vec![] };
+        let seconds = time_seconds(&stamps, time_loop, nt);
+
         // Z: planes in loop order → sorted bottom to top for the slider, middle one nominal
-        let zl = z_layout(loops, n_frames);
-        let zs = plane_z(&zl, frame_z);
+        let zl = z_layout_of(&nest);
+        let zs = plane_z(&zl, frame_z.get(base..).unwrap_or(&[]));
         let mut order: Vec<usize> = (0..zl.count).collect();
         if zs.iter().all(Option::is_some) {
             order.sort_by(|&a, &b| zs[a].unwrap().total_cmp(&zs[b].unwrap()));
@@ -1037,7 +1234,7 @@ impl Nd2Source {
             order.iter().map(|&k| zs[k].zip(z0).map(|(z, z0)| ((z - z0) * 1000.0).round())).collect()
         };
         let (z_planes, plane_pos) = make_planes(&offsets, nominal);
-        let z_frames: Vec<usize> = order.iter().map(|&k| k * zl.stride).collect();
+        let z_frames: Vec<usize> = order.iter().map(|&k| base + k * zl.stride).collect();
 
         let mut info = SourceInfo::basic("nd2", w as i64, h as i64);
         info.vendor = Some("nikon".into());
@@ -1054,11 +1251,20 @@ impl Nd2Source {
             .map(|(k, l)| LevelInfo { width: l.0 as i64, height: l.1 as i64, downsample: (1u64 << k) as f64 })
             .collect();
         info.associated = vec!["thumbnail".into()];
+        info.time_points = make_time_points(&seconds);
+        if n_pos > 1 {
+            let names = nest.axis(Axis::Xy).map(|k| nest.loops[k].names.as_slice()).unwrap_or(&[]);
+            info.series = (0..n_pos).map(|i| names.get(i).filter(|n| !n.is_empty()).cloned().unwrap_or_else(|| format!("Position {}", i + 1))).collect();
+        }
+        info.series_index = series as u32;
+        info.series_kind = "Position".into();
         Ok(Nd2Source {
             path: path.to_string(),
             info,
             frames,
+            series,
             z_frames,
+            t_frames,
             plane_pos,
             nominal,
             channels,
@@ -1217,8 +1423,8 @@ impl Nd2Source {
         composite(w, rows, &layers).ok_or_else(|| "ND2 frame without channels".into())
     }
 
-    fn paint(&self, zp: usize, c: &mut Canvas) -> Result<(), String> {
-        let seq = self.z_frames[zp];
+    fn paint(&self, t: usize, zp: usize, c: &mut Canvas) -> Result<(), String> {
+        let seq = self.z_frames[zp] + self.t_frames.get(t).copied().unwrap_or(0);
         match &self.frames {
             Frames::Modern { attrs, .. } => {
                 let mut fd = self.open_frame(seq)?;
@@ -1243,35 +1449,40 @@ impl Nd2Source {
         Ok(())
     }
 
-    /// Build (or fetch) the pyramid of z position `zp`.
-    fn plane(&self, zp: usize) -> Result<Arc<Pyramid>, String> {
-        if let Some(p) = self.cached_plane(zp) {
+    /// Build (or fetch) the pyramid of time point `t`, z position `zp` (built on first use).
+    fn plane(&self, t: usize, zp: usize) -> Result<Arc<Pyramid>, String> {
+        let key = (t, zp);
+        if let Some(p) = self.cached_plane(key) {
             return Ok(p);
         }
         let _g = self.build.lock().unwrap();
-        if let Some(p) = self.cached_plane(zp) {
+        if let Some(p) = self.cached_plane(key) {
             return Ok(p);
         }
         let (w, h) = (self.info.width as u32, self.info.height as u32);
         let big = w as u64 * h as u64 > MEM_PIXELS;
         let pyr = if big {
             let root = cache_dir("nd2");
-            let dir = root.join(cache_key(&self.path)).join(format!("z{zp}"));
+            let file_dir = root.join(cache_key(&self.path));
+            let name = if (self.series, t) == (0, 0) { format!("z{zp}") } else { format!("p{}-t{t}-z{zp}", self.series) };
+            let dir = file_dir.join(&name);
             if let Some(p) = open_cached(&dir, w, h) {
                 p
             } else {
                 prune(&root, &self.path);
+                prune_planes(&file_dir, &name);
                 std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
                 let _ = std::fs::remove_file(dir.join("complete"));
                 let mut c = Canvas::disk(&dir.join("L0.rgb"), w, h)?;
-                self.paint(zp, &mut c)?;
+                self.paint(t, zp, &mut c)?;
                 let p = Pyramid::on_disk(c, &dir, MEM_PIXELS / 4)?;
                 std::fs::write(dir.join("complete"), format!("{w} {h}")).map_err(|e| e.to_string())?;
+                let _ = std::fs::write(dir.join("used"), b"");
                 p
             }
         } else {
             let mut c = Canvas::Mem(RgbImage::new(w, h));
-            self.paint(zp, &mut c)?;
+            self.paint(t, zp, &mut c)?;
             let Canvas::Mem(img) = c else { unreachable!() };
             Pyramid::in_memory(img)?
         };
@@ -1280,7 +1491,7 @@ impl Nd2Source {
         let mut pc = self.planes.lock().unwrap();
         pc.clock += 1;
         let now = pc.clock;
-        pc.map.insert(zp, (pyr.clone(), bytes, now));
+        pc.map.insert(key, (pyr.clone(), bytes, now));
         while pc.map.len() > 1 && pc.map.values().map(|v| v.1).sum::<u64>() > MEM_PLANE_BUDGET {
             let oldest = *pc.map.iter().min_by_key(|(_, v)| v.2).unwrap().0;
             pc.map.remove(&oldest);
@@ -1288,22 +1499,28 @@ impl Nd2Source {
         Ok(pyr)
     }
 
-    fn cached_plane(&self, zp: usize) -> Option<Arc<Pyramid>> {
+    fn cached_plane(&self, key: (usize, usize)) -> Option<Arc<Pyramid>> {
         let mut pc = self.planes.lock().unwrap();
         pc.clock += 1;
         let now = pc.clock;
-        pc.map.get_mut(&zp).map(|e| {
+        pc.map.get_mut(&key).map(|e| {
             e.2 = now;
             e.0.clone()
         })
     }
 
-    fn zpos(&self, z: u32) -> usize {
-        self.plane_pos.get(z as usize).copied().unwrap_or(self.nominal)
+    /// A tile `z` (plane + time, `split_z`) as (time point, z position).
+    fn locate(&self, z: u32) -> Result<(usize, usize), String> {
+        let (plane, t) = split_z(z);
+        if t as usize >= self.t_frames.len().max(1) {
+            return Err(format!("ND2 time point {} not found", t + 1));
+        }
+        Ok((t as usize, self.plane_pos.get(plane as usize).copied().unwrap_or(self.nominal)))
     }
 
     fn fitted(&self, max_px: u32, z: u32) -> Result<RgbImage, String> {
-        let pyr = self.plane(self.zpos(z))?;
+        let (t, zp) = self.locate(z)?;
+        let pyr = self.plane(t, zp)?;
         let k = pyr.level_at_least(max_px);
         let (w, h) = pyr.levels[k].size();
         let img = pyr.crop(k, 0, 0, w, h)?;
@@ -1320,7 +1537,8 @@ impl SlideSource for Nd2Source {
     fn tile(&self, level: u32, x: u32, y: u32, z: u32) -> Result<RgbImage, String> {
         let (_, _, _, _, tw, th) = dz_tile_rect(self.info.width, self.info.height, level, x, y)?;
         let native = (dz_max_level(self.info.width, self.info.height) - level) as usize;
-        self.plane(self.zpos(z))?.crop(native, x * TILE_SIZE, y * TILE_SIZE, tw, th)
+        let (t, zp) = self.locate(z)?;
+        self.plane(t, zp)?.crop(native, x * TILE_SIZE, y * TILE_SIZE, tw, th)
     }
 
     fn associated(&self, name: &str) -> Result<RgbImage, String> {
@@ -1348,6 +1566,28 @@ fn open_cached(dir: &Path, w: u32, h: u32) -> Option<Pyramid> {
     let l0 = Canvas::open_disk(&dir.join("L0.rgb"), w, h).ok()?;
     let _ = std::fs::write(dir.join("used"), b"");
     Pyramid::on_disk(l0, dir, MEM_PIXELS / 4).ok()
+}
+
+/// Keep a file's most recently used plane pyramids (a long time series of a big image would
+/// otherwise fill the disk); `building` is about to be made.
+fn prune_planes(file_dir: &Path, building: &str) {
+    let Ok(rd) = std::fs::read_dir(file_dir) else { return };
+    let mut dirs: Vec<(std::time::SystemTime, PathBuf)> = rd
+        .flatten()
+        .filter(|e| e.path().is_dir() && e.file_name().to_string_lossy() != building)
+        .map(|e| {
+            let p = e.path();
+            let used = std::fs::metadata(p.join("used")).or_else(|_| e.metadata()).and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+            (used, p)
+        })
+        .collect();
+    if dirs.len() < KEEP_PLANES {
+        return;
+    }
+    dirs.sort_by(|a, b| b.0.cmp(&a.0));
+    for (_, p) in dirs.into_iter().skip(KEEP_PLANES - 1) {
+        let _ = std::fs::remove_dir_all(p);
+    }
 }
 
 /// Keep the most recently used files' disk pyramids (never the one being opened).
@@ -1681,7 +1921,7 @@ mod tests {
         let z = z_layout(&l, 6);
         assert_eq!((z.count, z.stride), (3, 1));
         // Z outside a 4-point XY loop
-        let l2 = vec![Loop { kind: LOOP_Z, count: 5, step_um: Some(1.0), inverted: true }, Loop { kind: LOOP_XY, count: 4, step_um: None, inverted: false }];
+        let l2 = vec![Loop { kind: LOOP_Z, count: 5, step_um: Some(1.0), inverted: true, ..Default::default() }, lp(LOOP_XY, 4)];
         let z = z_layout(&l2, 20);
         assert_eq!((z.count, z.stride), (5, 4));
         // an interrupted acquisition: only the planes that exist
@@ -1699,6 +1939,146 @@ mod tests {
         let legacy = br#"<Metadata><variant><no_name><LoopNo00 runtype="RLxExperiment"><eType value="8"/><uLoopPars><no_name><uiCount value="7"/><x><uiCount value="99"/></x></no_name></uLoopPars></LoopNo00><LoopNo01 runtype="RLxExperiment"><eType value="4"/><uLoopPars><no_name><uiCount value="3"/><dZStep runtype="double" value="0.2"/></no_name></uLoopPars></LoopNo01></no_name></variant></Metadata>"#;
         let l = loops_from(&parse_xml(legacy));
         assert_eq!(l.iter().map(|l| (l.kind, l.count)).collect::<Vec<_>>(), vec![(LOOP_NE_TIME, 7), (LOOP_Z, 3)]);
+    }
+
+    fn lp(kind: i64, count: usize) -> Loop {
+        Loop { kind, count, ..Default::default() }
+    }
+
+    /// An experiment loop: `eType`, `uLoopPars` (uiCount first, then `pars`), `extra` items,
+    /// and the next level inside `ppNextLevelEx`.
+    fn exp_loop(name: &str, kind: u32, count: u32, pars: Vec<Vec<u8>>, extra: Vec<Vec<u8>>, inner: Option<Vec<u8>>) -> Vec<u8> {
+        let mut p = vec![lv_u32("uiCount", count)];
+        p.extend(pars);
+        let mut items = vec![lv_u32("eType", kind), lv_level("uLoopPars", &p)];
+        items.extend(extra);
+        if let Some(i) = inner {
+            items.push(lv_level("ppNextLevelEx", &[i]));
+        }
+        lv_level(name, &items)
+    }
+
+    fn xy_points(names: &[&str]) -> Vec<u8> {
+        let pts: Vec<Vec<u8>> = names.iter().map(|n| lv_level("", &[lv_f64("dPosX", 1.0), lv_f64("dPosY", 2.0), lv_str("dPosName", n)])).collect();
+        lv_level("Points", &pts)
+    }
+
+    #[test]
+    fn loop_nest_frames() {
+        // time 3 > XY 2 > Z 4 (channels are components of a frame, not frames)
+        let n = LoopNest::new(&[lp(LOOP_TIME, 3), lp(LOOP_XY, 2), lp(LOOP_Z, 4)], 24);
+        assert_eq!(n.strides, vec![8, 4, 1]);
+        assert_eq!((n.count(Axis::Time), n.count(Axis::Xy), n.count(Axis::Z)), (3, 2, 4));
+        assert_eq!(n.frame(0, 0, 0), 0);
+        assert_eq!(n.frame(1, 0, 0), 4);
+        assert_eq!(n.frame(0, 1, 0), 8);
+        assert_eq!(n.frame(1, 2, 3), 23);
+        // XY 2 > time 3 > Z 4: a position's time points are contiguous
+        let n = LoopNest::new(&[lp(LOOP_XY, 2), lp(LOOP_TIME, 3), lp(LOOP_Z, 4)], 24);
+        assert_eq!((n.frame(1, 0, 0), n.frame(0, 1, 0), n.frame(1, 2, 3)), (12, 4, 23));
+        // Z outside time (Z 3 > NE time 5), and no XY loop
+        let n = LoopNest::new(&[lp(LOOP_Z, 3), lp(LOOP_NE_TIME, 5)], 15);
+        assert_eq!((n.count(Axis::Xy), n.frame(0, 4, 0), n.frame(0, 0, 2), n.frame(0, 4, 2)), (1, 4, 10, 14));
+        assert_eq!(z_layout(&[lp(LOOP_Z, 3), lp(LOOP_NE_TIME, 5)], 15).stride, 5);
+        // time innermost: T 6 inside XY 3
+        let n = LoopNest::new(&[lp(LOOP_XY, 3), lp(LOOP_TIME, 6)], 18);
+        assert_eq!((n.frame(2, 0, 0), n.frame(2, 5, 0)), (12, 17));
+        // an interrupted time series keeps only whole time points
+        let n = LoopNest::new(&[lp(LOOP_TIME, 10), lp(LOOP_XY, 2), lp(LOOP_Z, 3)], 20);
+        assert_eq!((n.count(Axis::Time), n.count(Axis::Xy), n.count(Axis::Z)), (3, 2, 3));
+        // nothing at all: one of everything
+        let n = LoopNest::new(&[], 1);
+        assert_eq!((n.count(Axis::Time), n.count(Axis::Xy), n.count(Axis::Z), n.frame(0, 0, 0)), (1, 1, 1, 0));
+        // a loop we don't know stays at its first item but still spaces the frames
+        let n = LoopNest::new(&[lp(LOOP_TIME, 2), lp(7, 3)], 6);
+        assert_eq!(n.frame(0, 1, 0), 3);
+    }
+
+    #[test]
+    fn loops_from_metadata() {
+        // time (period 2 s, measured 2.1 s) > XY (3 named points, the middle one skipped) > Z 2 > channels
+        let spect = exp_loop("", 6, 2, vec![], vec![], None);
+        let z = exp_loop("", 4, 2, vec![lv_f64("dZStep", 1.5)], vec![], Some(spect));
+        let xy = exp_loop("", 2, 3, vec![xy_points(&["left", "mid", "right"])], vec![lv_bytes("pItemValid", &[1, 0, 1])], Some(z));
+        let t = exp_loop("SLxExperiment", 1, 4, vec![lv_f64("dPeriod", 2000.0), lv_f64("dAvgPeriodDiff", 2100.0)], vec![], Some(xy));
+        let l = loops_from(&parse_lv(&t));
+        assert_eq!(l.iter().map(|l| (l.kind, l.count)).collect::<Vec<_>>(), vec![(LOOP_TIME, 4), (LOOP_XY, 2), (LOOP_Z, 2)]);
+        assert_eq!(l[0].periods, vec![(4, 2100.0)]);
+        assert_eq!(l[1].names, vec!["left".to_string(), "right".to_string()]);
+        let n = LoopNest::new(&l, 16);
+        assert_eq!((n.frame(1, 0, 0), n.frame(0, 1, 0), n.frame(1, 3, 1)), (2, 4, 15));
+        // names that don't match the count are dropped
+        let xy = exp_loop("SLxExperiment", 2, 3, vec![xy_points(&["only one"])], vec![], None);
+        assert!(loops_from(&parse_lv(&xy))[0].names.is_empty());
+        // NE time: the valid phases' intervals
+        let ph = |n: u32, p: f64| lv_level("", &[lv_u32("uiCount", n), lv_f64("dStart", 0.0), lv_f64("dPeriod", p)]);
+        let ne = exp_loop("SLxExperiment", 8, 9, vec![lv_level("pPeriod", &[ph(3, 1000.0), ph(6, 60000.0), ph(2, 5.0)]), lv_bytes("pPeriodValid", &[1, 1, 0])], vec![], None);
+        assert_eq!(loops_from(&parse_lv(&ne))[0].periods, vec![(3, 1000.0), (6, 60000.0)]);
+        // legacy XML: NE time > XY with a list of position names and boolean validity
+        let legacy = br##"<Metadata><variant><no_name><LoopNo00 runtype="RLxExperiment"><eType value="8"/><uLoopPars><no_name><uiCount value="2"/><pPeriod><_00><uiCount runtype="lx_uint32" value="2"/><dPeriod runtype="double" value="30000.0"/></_00></pPeriod><pPeriodValid><_00 runtype="bool" value="true"/></pPeriodValid></no_name></uLoopPars></LoopNo00><LoopNo01 runtype="RLxExperiment"><eType value="2"/><uLoopPars><no_name><uiCount value="3"/><pPosName><_00 runtype="CLxStringW" value="#1"/><_01 runtype="CLxStringW" value="#2"/><_02 runtype="CLxStringW" value="#3"/></pPosName></no_name></uLoopPars><pItemValid><_00 runtype="bool" value="true"/><_01 runtype="bool" value="true"/><_02 runtype="bool" value="false"/></pItemValid></LoopNo01></no_name></variant></Metadata>"##;
+        let l = loops_from(&parse_xml(legacy));
+        assert_eq!(l.iter().map(|l| (l.kind, l.count)).collect::<Vec<_>>(), vec![(LOOP_NE_TIME, 2), (LOOP_XY, 2)]);
+        assert_eq!(l[0].periods, vec![(2, 30000.0)]);
+        assert_eq!(l[1].names, vec!["#1".to_string(), "#2".to_string()]);
+    }
+
+    #[test]
+    fn times() {
+        // frame timestamps (ms) win when they rise
+        let s = time_seconds(&[Some(500.0), Some(2500.0), Some(4600.0)], None, 3);
+        assert_eq!(s, vec![Some(0.0), Some(2.0), Some(4.1)]);
+        // otherwise the loop's intervals: one phase, then two phases
+        let one = Loop { periods: vec![(3, 10_000.0)], ..lp(LOOP_TIME, 3) };
+        assert_eq!(time_seconds(&[Some(0.0), Some(0.0), Some(0.0)], Some(&one), 3), vec![Some(0.0), Some(10.0), Some(20.0)]);
+        let two = Loop { periods: vec![(2, 1000.0), (3, 60_000.0)], ..lp(LOOP_NE_TIME, 5) };
+        assert_eq!(time_seconds(&[], Some(&two), 5), vec![Some(0.0), Some(1.0), Some(61.0), Some(121.0), Some(181.0)]);
+        // timestamps going backwards or missing, no interval: unknown
+        assert_eq!(time_seconds(&[Some(5.0), Some(1.0)], Some(&lp(LOOP_TIME, 2)), 2), vec![None, None]);
+        assert_eq!(time_seconds(&[None, Some(1.0)], None, 2), vec![None, None]);
+        assert_eq!(time_seconds(&[Some(f64::NAN), Some(1.0)], None, 2), vec![None, None]);
+    }
+
+    /// XY 2 ("A", "B") > time 3 (5 s apart), no Z, two 16-bit channels; frame i's signal is
+    /// divided by i + 1, so every (position, time) looks different.
+    fn multipoint() -> Vec<u8> {
+        let (w, h) = (40u32, 30u32);
+        let t = exp_loop("", 1, 3, vec![lv_f64("dPeriod", 5000.0)], vec![], None);
+        let xy = exp_loop("SLxExperiment", 2, 2, vec![xy_points(&["A", "B"])], vec![lv_bytes("pItemValid", &[1, 1])], Some(t));
+        let mut chunks = vec![
+            ("ImageAttributesLV!".to_string(), attributes(w, h, w * 4, 2, 16, 6, 2)),
+            ("ImageMetadataLV!".to_string(), xy),
+            ("ImageMetadataSeqLV|0!".to_string(), metadata_seq(vec![plane(0, "DAPI", 0xFF0000, 461.0), plane(1, "FITC", 0x00FF00, 520.0)])),
+        ];
+        for i in 0..6u16 {
+            let mut data = (1000.0 + (i % 3) as f64 * 5000.0 + (i / 3) as f64 * 100.0).to_le_bytes().to_vec();
+            data.extend(frame_pixels(w, h, 0, 1 + i));
+            chunks.push((format!("ImageDataSeq|{i}!"), data));
+        }
+        nd2_file(&chunks)
+    }
+
+    #[test]
+    fn multipoint_time_series_opens() {
+        let (dir, p) = write_temp("multipoint", &multipoint());
+        let max = dz_max_level(40, 30);
+        let blue = |s: &Nd2Source, z: u32| s.tile(max, 0, 0, z).unwrap().get_pixel(2, 2).0[2];
+        let a = Nd2Source::open(&p).unwrap();
+        let i = a.info();
+        assert_eq!((i.series.clone(), i.series_index, i.series_kind.as_str()), (vec!["A".to_string(), "B".to_string()], 0, "Position"));
+        assert_eq!(i.time_points.iter().map(|t| t.label.as_str()).collect::<Vec<_>>(), vec!["0 s", "5 s", "10 s"]);
+        assert_eq!(i.z_planes.len(), 1);
+        let b = Nd2Source::open_series(&p, 1).unwrap();
+        assert_eq!((b.info().series_index, b.info().time_points.len()), (1, 3));
+        // frames 0..2 are A's time points, 3..5 B's: each one dimmer than the last
+        let (a0, a2) = (blue(&a, 0), blue(&a, 2 * super::super::T_STRIDE));
+        let (b0, b2) = (blue(&b, 0), blue(&b, 2 * super::super::T_STRIDE));
+        assert!(a0 > a2 && b0 > b2, "time: {a0} {a2} {b0} {b2}");
+        // each position is stretched on its own first frame: B fades from 1/4 to 1/6 (two thirds), A from 1 to 1/3
+        assert!(b2 > a2, "positions differ: {a2} {b2}");
+        assert_ne!(a.overview(20, super::super::T_STRIDE).unwrap(), a.overview(20, 0).unwrap());
+        assert!(a.tile(max, 0, 0, 3 * super::super::T_STRIDE).is_err(), "no fourth time point");
+        assert!(Nd2Source::open_series(&p, 2).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1786,15 +2166,16 @@ mod tests {
     #[test]
     #[ignore]
     fn real_nd2_samples() {
-        // name, size, planes, components, mpp
-        let want: [(&str, (i64, i64), usize, usize, f64); 5] = [
-            ("BF007.nd2", (164, 156), 1, 1, 0.158389678930686),
-            ("HE_002.nd2", (2880, 2048), 1, 3, 0.6),
-            ("Experiment_0001.nd2", (1750, 1664), 17, 1, 0.05714285714285715),
-            ("header_test1.nd2", (696, 520), 3, 2, 0.12863494437945),
-            ("b16_14_12.nd2", (1280, 1024), 1, 2, 0.154799),
+        // name, size, planes, components, mpp, time points, stage positions
+        let want: [(&str, (i64, i64), usize, usize, f64, usize, usize); 6] = [
+            ("BF007.nd2", (164, 156), 1, 1, 0.158389678930686, 0, 0),
+            ("HE_002.nd2", (2880, 2048), 1, 3, 0.6, 0, 0),
+            ("Experiment_0001.nd2", (1750, 1664), 17, 1, 0.05714285714285715, 0, 0),
+            ("header_test1.nd2", (696, 520), 3, 2, 0.12863494437945, 7, 0),
+            ("b16_14_12.nd2", (1280, 1024), 1, 2, 0.154799, 50, 0),
+            ("N1_file_bugged_reconstructed-version.nd2", (2048, 2048), 1, 1, 0.032350865657703, 0, 5),
         ];
-        for (name, (w, h), planes, comps, mpp) in want {
+        for (name, (w, h), planes, comps, mpp, times, positions) in want {
             let Some(p) = sample(name) else {
                 eprintln!("skip {name}: not downloaded");
                 continue;
@@ -1802,8 +2183,28 @@ mod tests {
             let s = Nd2Source::open(&p).unwrap();
             let i = s.info();
             eprintln!("{name}: {:?}, z {:?}", s.channel_summary(), i.z_planes.iter().map(|z| &z.label).collect::<Vec<_>>());
+            eprintln!("  t {:?}, positions {:?}", i.time_points.iter().map(|t| &t.label).collect::<Vec<_>>(), i.series);
             assert_eq!((i.width, i.height, i.z_planes.len(), s.comps), (w, h, planes, comps), "{name}");
             assert!(i.calibrated && (i.mpp_x - mpp).abs() < 1e-9, "{name}: mpp {}", i.mpp_x);
+            assert_eq!((i.time_points.len(), i.series.len()), (times, positions), "{name}");
+            // times rise from 0 and the last time point looks different from the first
+            if times > 1 {
+                assert_eq!(i.time_points[0].seconds, Some(0.0), "{name}");
+                assert!(i.time_points.windows(2).all(|w| w[1].seconds > w[0].seconds), "{name}: {:?}", i.time_points);
+                let last = (times as u32 - 1) * super::super::T_STRIDE;
+                assert_ne!(s.overview(256, 0).unwrap(), s.overview(256, last).unwrap(), "{name}: time points look the same");
+                assert!(s.overview(256, times as u32 * super::super::T_STRIDE).is_err());
+            }
+            // every position opens, and they differ
+            if positions > 1 {
+                let first = s.overview(256, 0).unwrap();
+                for k in 1..positions {
+                    let other = Nd2Source::open_series(&p, k as u32).unwrap();
+                    assert_eq!(other.info().series_index, k as u32);
+                    assert_ne!(first, other.overview(256, 0).unwrap(), "{name}: position {k} looks like position 0");
+                }
+                assert!(Nd2Source::open_series(&p, positions as u32).is_err());
+            }
             let o = s.overview(1024, 0).unwrap();
             let mean: f64 = o.as_raw().iter().map(|&v| v as f64).sum::<f64>() / o.as_raw().len() as f64;
             assert!(mean > 5.0 && mean < 250.0, "{name}: mean {mean}");
