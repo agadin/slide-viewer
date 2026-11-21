@@ -27,6 +27,7 @@ image = { version = "0.25.10", default-features = false, features = ["jpeg", "pn
 tiff = "0.11"
 # Olympus .vsi JPEG 2000 tiles (pure Rust, MIT OR Apache-2.0); 0.3.x builds with Rust 1.90
 hayro-jpeg2000 = { version = "0.3.5", default-features = false, features = ["std", "simd"] }
+cfb = "0.14"
 tauri-plugin-dialog = "2.8.4"
 
 
