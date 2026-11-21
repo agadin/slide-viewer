@@ -17,7 +17,7 @@ Every file is shown the same way: zoom and pan, pins and rulers, adjustments. An
 | Generic tiled TIFF | `.tif`, `.tiff` | Whole-slide TIFFs, including pyramidal and OME-TIFF files written by most scanners. |
 | Leica | `.scn` | Brightfield scans. The slide opens on the part of the glass that was scanned, not the whole slide. When several areas were scanned (for example four sections on one slide), they're shown together in their real places on the glass, with white where nothing was scanned. |
 | 3DHISTECH MIRAX | `.mrxs` | Open the `.mrxs` file; its folder of data files must sit next to it with the same name. Like Leica files, it opens on the scanned part of the glass. |
-| Ventana / Roche | `.bif` | Slides from Ventana iScan scanners. When the scanner scanned more than one area of the glass, they're shown together in their real places, with white between them. |
+| Ventana / Roche | `.bif` | Slides from Ventana iScan scanners and from the newer VENTANA DP 200 (which OpenSlide can't read; Slide Viewer stitches their tiles itself). When the scanner scanned more than one area of the glass, they're shown together in their real places, with white between them. |
 | Philips | `.tiff` | |
 | Sakura | `.svslide` | |
 | DICOM | `.dcm` (whole-slide) | Open any `.dcm` file of the series; the rest of the series must be in the same folder. |
@@ -26,7 +26,7 @@ Every file is shown the same way: zoom and pan, pins and rulers, adjustments. An
 
 Slides are read with [OpenSlide](https://openslide.org) and, for Zeiss files, [libCZI](https://github.com/ZEISS/libczi). Both are built into the app. The label, macro and thumbnail pictures a scanner saves are used where the file has them.
 
-**Not yet supported:** Olympus `.vsi`, `.bif` files from the Roche DP 200 scanner, and fluorescence Leica `.scn` files. Convert them to OME-TIFF (for example with QuPath or bfconvert) and open that.
+**Not yet supported:** Olympus `.vsi` and fluorescence Leica `.scn` files. Convert them to OME-TIFF (for example with QuPath or bfconvert) and open that.
 
 ### Scale and measurements
 
