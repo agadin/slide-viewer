@@ -1,0 +1,30 @@
+# Licences and known vulnerabilities of the Rust dependencies (cargo-deny, rules in
+# app/src-tauri/deny.toml). Also weekly: a new RustSec advisory can appear without any change here.
+# The npm packages that ship are checked by `npm run test:logic` (tests/release.test.ts).
+name: Dependencies
+on:
+  push:
+    branches: [main]
+    paths: ["app/src-tauri/Cargo.*", "app/src-tauri/deny.toml", ".github/workflows/deps.yml"]
+  pull_request:
+    paths: ["app/src-tauri/Cargo.*", "app/src-tauri/deny.toml", ".github/workflows/deps.yml"]
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  deny:
+    name: Licences and advisories (cargo-deny)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust (the version in rust-toolchain.toml)
+        run: rustup toolchain install
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.22.0
+      - name: cargo deny check
+        working-directory: app/src-tauri
+        run: cargo deny check

@@ -208,7 +208,10 @@ mod tests {
     #[ignore]
     fn renders_real_slide_tile() {
         let p = "/Users/alexandergadin/vscode/micro-speed-grader/images/VMS104.ndpi";
-        assert!(Path::new(p).exists(), "needs {p}");
+        if !Path::new(p).exists() {
+            eprintln!("skipping: {p} not present");
+            return;
+        }
         let s = OpenSlideSource::open(p).expect("open");
         let max = super::super::dz_max_level(s.info.width, s.info.height);
         let full = s.tile(max, 10, 10, 0).unwrap();

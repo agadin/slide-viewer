@@ -1649,7 +1649,7 @@ mod tests {
     #[test]
     #[ignore]
     fn real_vsi_samples() {
-        let root = std::env::var("VSI_SAMPLES").unwrap_or("/Users/alexandergadin/vscode/slide-viewer/test-data/formats".into());
+        let root = std::env::var("VSI_SAMPLES").unwrap_or(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test-data/formats").into());
         let mut seen = 0;
         for n in ["OS-1", "OS-2", "OS-3"] {
             let p = format!("{root}/Olympus__{n}/{n}.vsi");

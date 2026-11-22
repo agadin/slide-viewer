@@ -32,6 +32,9 @@ jobs:
           - { name: macOS Apple silicon, os: macos-latest, lib: mac }
           - { name: macOS Intel, os: macos-15-intel, lib: mac }
           - { name: Windows, os: windows-latest, lib: windows }
+    # Not for the version-bump push ("v0.1.2"): tools/release.sh starts its own run of this workflow
+    # on that commit. (Update the prefix at 1.0.)
+    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'v0.')
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     defaults:
@@ -39,7 +42,8 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Rust (the version in rust-toolchain.toml)
+        run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: app/src-tauri
@@ -74,7 +78,8 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: app/package-lock.json
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Rust (the version in rust-toolchain.toml)
+        run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: app/src-tauri

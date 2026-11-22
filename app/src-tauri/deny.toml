@@ -1,0 +1,54 @@
+# cargo-deny: checks every Rust dependency (CI: .github/workflows/deps.yml; locally `cargo deny check`).
+# The rule (SPEC.md): MIT / Apache code, plus LGPL only as a separately shipped library. OpenSlide and
+# libCZI are LGPL but they're loaded at run time from frameworks/ or lib/, so they aren't crates
+# and don't appear here.
+
+[graph]
+# only what ends up in a build we ship
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-pc-windows-msvc"]
+
+[licenses]
+# MIT / Apache, and licences that ask no more than they do (keep the notice)
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "0BSD",
+    "CC0-1.0",
+    "Unlicense",
+    "Unicode-3.0",
+]
+confidence-threshold = 0.9
+# MPL-2.0 is file-level copyleft: fine for crates used unmodified. These come in with Tauri
+# (HTML parsing in tauri-utils, and `dirs`); a new MPL crate has to be added here on purpose.
+exceptions = [
+    { name = "cssparser", allow = ["MPL-2.0"] },
+    { name = "cssparser-macros", allow = ["MPL-2.0"] },
+    { name = "selectors", allow = ["MPL-2.0"] },
+    { name = "dtoa-short", allow = ["MPL-2.0"] },
+    { name = "option-ext", allow = ["MPL-2.0"] },
+]
+
+[licenses.private]
+# the app itself (publish = false in Cargo.toml)
+ignore = true
+
+[advisories]
+# RustSec: a dependency with a known vulnerability fails; unmaintained crates deep in Tauri's tree
+# only warn (nothing we can change without Tauri)
+unmaintained = "workspace"
+yanked = "warn"
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

@@ -1,0 +1,50 @@
+# Opens a real sample of every format with a small public file (tools/fetch-format-samples.py
+# --max-mb 120: about 1.2 GB, checksummed, cached between runs) using the app's own readers:
+# tools/check-formats.sh (open + render a tile, per file) and the readers' sample tests
+# (`cargo test -- --ignored`: sizes, focal planes, channels, time points, stage positions, pixel sums).
+# The larger samples (Leica-2 .scn, OS-2 .bif, the Olympus .vsi slides, the .zvi mosaic) stay a
+# local check: tools/fetch-format-samples.py test-data/formats && tools/check-formats.sh.
+name: Formats
+on:
+  push:
+    branches: [main]
+    paths: ["app/src-tauri/src/**", "app/src-tauri/examples/**", "app/src-tauri/Cargo.*", "tools/fetch-*", "tools/check-formats.sh", ".github/workflows/formats.yml"]
+  pull_request:
+    paths: ["app/src-tauri/src/**", "app/src-tauri/examples/**", "app/src-tauri/Cargo.*", "tools/fetch-*", "tools/check-formats.sh", ".github/workflows/formats.yml"]
+  workflow_dispatch:
+concurrency:
+  group: formats-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  samples:
+    name: Sample files of every format (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust (the version in rust-toolchain.toml)
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+          key: formats
+      - name: Fetch the native libraries
+        run: |
+          tools/fetch-openslide.sh mac
+          tools/fetch-libczi.sh mac
+      - name: Restore the samples
+        uses: actions/cache@v4
+        with:
+          path: test-data/formats
+          key: format-samples-${{ hashFiles('tools/fetch-format-samples.py') }}
+          # an older set is reused: the script keeps files whose checksum still matches
+          restore-keys: format-samples-
+      - name: Download the small samples (checksummed)
+        run: python3 tools/fetch-format-samples.py test-data/formats --max-mb 120
+      - name: Open every sample and render a tile
+        run: tools/check-formats.sh
+      - name: Readers' sample tests
+        working-directory: app/src-tauri
+        run: cargo test --release --lib -- --ignored

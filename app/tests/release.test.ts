@@ -176,3 +176,16 @@ test("release: names, versions and bundling agree", () => {
   ok(build.includes("fetch-libczi.sh") && build.includes("fetch-openslide.sh"), "the Build workflow fetches OpenSlide and (when present) libCZI");
   ok(fs.existsSync(path.join(app, "src-tauri/examples/smoke.rs")), "the smoke example the Build workflow runs exists");
 });
+
+// Every npm package that ships in the app (not dev tools) is under a licence the project allows (SPEC:
+// MIT / Apache and licences like them; fonts under the OFL). A new one fails here until it's checked
+// and added. The Rust side is checked by cargo-deny (src-tauri/deny.toml).
+test("release: licences of the npm packages that ship", () => {
+  const allowed = new Set(["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "0BSD", "OFL-1.1"]);
+  const fits = (l: string) => l.split(/\s+OR\s+/).some((x) => allowed.has(x.replace(/[()]/g, "")));
+  const lock = JSON.parse(read(path.resolve("package-lock.json")));
+  const bad = Object.entries(lock.packages as Record<string, { dev?: boolean; license?: string }>)
+    .filter(([k, v]) => k && !v.dev && !fits(v.license ?? ""))
+    .map(([k, v]) => `${k.replace(/.*node_modules\//, "")}: ${v.license ?? "no licence"}`);
+  eq(bad, [], "every shipped npm package has an allowed licence");
+});

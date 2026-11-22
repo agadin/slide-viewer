@@ -1,7 +1,17 @@
-"""Download one small OpenSlide test file per format the app claims, verifying the sha256 the index lists."""
+"""Download one small OpenSlide test file per format the app claims, verifying the sha256 the index lists.
+   tools/fetch-format-samples.py <dir>                 # everything (~7 GB)
+   tools/fetch-format-samples.py <dir> --max-mb 120    # only samples whose largest file is at most 120 MB (CI)
+Exits 1 if any download fails its checksum."""
 import hashlib, json, os, sys, urllib.parse, urllib.request, zipfile
 BASE = "https://openslide.cs.cmu.edu/download/openslide-testdata/"
 OUT = sys.argv[1]
+MAX = float(sys.argv[sys.argv.index("--max-mb") + 1]) * 1e6 if "--max-mb" in sys.argv else float("inf")
+bad = 0
+def too_big(name, size):
+    if size <= MAX:
+        return False
+    print(f"skip {name} ({size/1e6:.0f} MB, over --max-mb)", flush=True)
+    return True
 WANT = [
     "Aperio/CMU-1-Small-Region.svs",       # .svs (JPEG)
     "Aperio/JP2K-33003-1.svs",             # .svs (JPEG 2000)
@@ -31,6 +41,8 @@ idx = json.load(urllib.request.urlopen(BASE + "index.json"))
 os.makedirs(OUT, exist_ok=True)
 for key in WANT:
     meta = idx[key]
+    if too_big(key, meta["size"]):
+        continue
     dest = os.path.join(OUT, key.replace("/", "__"))
     if dest.endswith(".zip") and os.path.isdir(dest[:-4]):
         print(f"ok {key} (already unpacked)", flush=True); continue
@@ -43,7 +55,7 @@ for key in WANT:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
     if h.hexdigest() != meta["sha256"]:
-        print(f"CHECKSUM MISMATCH {key}", flush=True); os.remove(dest); continue
+        bad += 1; print(f"CHECKSUM MISMATCH {key}", flush=True); os.remove(dest); continue
     if dest.endswith(".zip"):
         d = dest[:-4]
         if not os.path.isdir(d):
@@ -70,7 +82,11 @@ OME_FILES = [
     ("_Image_V4.1_FL_3D_/stack10000/frame_t.ets", "0a5d19994265c1ac23fadb9ed522fc1a8102f08f8be4624114831654436ba6b0", 29483993),
     ("_Image_V4.1_FL_3D_/stack10002/frame_t_0.ets", "3908202e1eb15198db4a3e54487d66c51a3f01eff6bedeb275e00a78dfcdfadb", 355503856),
 ]
+# a cellSens image is its .vsi plus its folder: download all of it or none
+OME_BIG = {r.split("/")[0].strip("_").removesuffix(".vsi") for r, _, n in OME_FILES if n > MAX}
 for rel, sha, size in OME_FILES:
+    if rel.split("/")[0].strip("_").removesuffix(".vsi") in OME_BIG:
+        print(f"skip CellSens/evident/{rel} (its image has a file over --max-mb)", flush=True); continue
     dest = os.path.join(OUT, "CellSens-evident", rel)
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     if not (os.path.exists(dest) and os.path.getsize(dest) == size):
@@ -82,7 +98,7 @@ for rel, sha, size in OME_FILES:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
     if h.hexdigest() != sha:
-        print(f"CHECKSUM MISMATCH CellSens/evident/{rel}", flush=True); os.remove(dest); continue
+        bad += 1; print(f"CHECKSUM MISMATCH CellSens/evident/{rel}", flush=True); os.remove(dest); continue
     print(f"ok CellSens/evident/{rel}", flush=True)
 # Leica .lif from the OME sample image server (no published checksums: these pin the tested files).
 # Each folder's COPYING is CC BY 4.0: Project007 (c) Peter Zentis (zenodo 6606445; 4-channel z-stacks
@@ -95,6 +111,8 @@ LIF_FILES = [
     ("michael/PR2729_frameOrderCombinedScanTypes.lif", "17994bb1bdf93dd1a34a19ed53e5a3d7f672470a8057e2998e25d2474437a052", 227429),
 ]
 for rel, sha, size in LIF_FILES:
+    if too_big(rel, size):
+        continue
     dest = os.path.join(OUT, "Leica-LIF", os.path.basename(rel))
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     if not (os.path.exists(dest) and os.path.getsize(dest) == size):
@@ -106,7 +124,7 @@ for rel, sha, size in LIF_FILES:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
     if h.hexdigest() != sha:
-        print(f"CHECKSUM MISMATCH Leica-LIF/{rel}", flush=True); os.remove(dest); continue
+        bad += 1; print(f"CHECKSUM MISMATCH Leica-LIF/{rel}", flush=True); os.remove(dest); continue
     print(f"ok Leica-LIF/{rel}", flush=True)
 
 # Olympus/Evident FluoView .oir confocal stacks from the OME sample image server (no published
@@ -123,6 +141,8 @@ OIR_FILES = [
     ("gh-4205/zenodo-12773657/DAPI_mCherry_4Z_5Lambda-420-630-w10nm-s50nm.oir", "73c4160baf79043f301fe470cfa3832aaf17d789f99ab35b9b736d4af2ace67d", 14595535),
 ]
 for rel, sha, size in OIR_FILES:
+    if too_big(rel, size):
+        continue
     dest = os.path.join(OUT, "Olympus-OIR", os.path.basename(rel))
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     if not (os.path.exists(dest) and os.path.getsize(dest) == size):
@@ -134,7 +154,7 @@ for rel, sha, size in OIR_FILES:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
     if h.hexdigest() != sha:
-        print(f"CHECKSUM MISMATCH Olympus-OIR/{rel}", flush=True); os.remove(dest); continue
+        bad += 1; print(f"CHECKSUM MISMATCH Olympus-OIR/{rel}", flush=True); os.remove(dest); continue
     print(f"ok Olympus-OIR/{rel}", flush=True)
 
 # Nikon .nd2 from the OME sample image server (no published checksums: these pin the files the
@@ -150,6 +170,8 @@ ND2_FILES = [
     ("zenodo-15046688/N1_file_bugged_reconstructed-version.nd2", "794f8716988e77c41dc3f16a490c7af77e942c263e3531986e459a99985d7768", 84156416),  # Louis Romette: 2D-SIM neurons, 5 named stage positions
 ]
 for rel, sha, size in ND2_FILES:
+    if too_big(rel, size):
+        continue
     dest = os.path.join(OUT, "ND2", os.path.basename(rel))
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     if not (os.path.exists(dest) and os.path.getsize(dest) == size):
@@ -161,6 +183,7 @@ for rel, sha, size in ND2_FILES:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
     if h.hexdigest() != sha:
-        print(f"CHECKSUM MISMATCH ND2/{rel}", flush=True); os.remove(dest); continue
+        bad += 1; print(f"CHECKSUM MISMATCH ND2/{rel}", flush=True); os.remove(dest); continue
     print(f"ok ND2/{rel}", flush=True)
-print("DONE", flush=True)
+print("DONE" if not bad else f"{bad} FAILED", flush=True)
+sys.exit(1 if bad else 0)

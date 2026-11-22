@@ -9,6 +9,11 @@ Read `SPEC.md` first. It holds the agreed product decisions and the NDPA format.
   unknown XML when writing annotations back.
 - Run `tools/fetch-openslide.sh mac` once on a new machine before `cargo check` / `tauri dev`.
 - Before committing: `cd app && npx tsc --noEmit && npm run test:logic`, and `cd app/src-tauri && cargo check && cargo test`.
+- CI (`.github/workflows`): **CI** (tsc, logic tests, web build), **Build** (Rust tests and a slide opened on macOS ×2 and
+  Windows, Windows installer), **Formats** (the small public samples, `fetch-format-samples.py --max-mb 120`, through
+  `check-formats.sh` and the ignored sample tests) and **Dependencies** (`cargo deny check`, rules in
+  `app/src-tauri/deny.toml`; weekly too). A new Rust dependency under another licence fails `cargo deny`; a new
+  shipped npm package fails `npm run test:logic`.
 - `test-data/` and the real slides in MSG's `images/` are course material: never commit them.
 - Help pages live in `docs/help/*.md`; update the page when a feature changes.
 
