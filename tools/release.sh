@@ -59,13 +59,7 @@ rustup target add aarch64-apple-darwin x86_64-apple-darwin >/dev/null
 "$ROOT/tools/fetch-openslide.sh" mac >/dev/null
 if [ -x "$ROOT/tools/fetch-libczi.sh" ]; then "$ROOT/tools/fetch-libczi.sh" mac >/dev/null; fi
 # bundle every dylib the fetch scripts left in frameworks/ (OpenSlide, and libCZI when present)
-OVERLAY=$(cd "$T" && python3 - <<'PY'
-import glob, json
-libs = sorted(glob.glob("frameworks/*.dylib"))
-lic = {p: "licenses/" + p.split("/")[-1] for p in sorted(glob.glob("frameworks/*LICENSE*"))}
-print(json.dumps({"bundle": {"macOS": {"frameworks": libs}, "resources": lic}}))
-PY
-)
+OVERLAY=$(python3 "$ROOT/tools/mac-bundle-config.py")
 echo "bundling: $OVERLAY"
 (cd "$APP" && APPLE_SIGNING_IDENTITY="$IDENTITY" TAURI_SIGNING_PRIVATE_KEY="$(cat "$KEY")" \
   TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" npm run tauri build -- --target universal-apple-darwin --bundles app,dmg --config "$OVERLAY")

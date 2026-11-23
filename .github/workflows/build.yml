@@ -1,14 +1,15 @@
-# Builds Slide Viewer on each platform and checks the bundled slide libraries (OpenSlide, and libCZI
-# when tools/fetch-libczi.sh exists) can open a slide. Runs when the native side or bundling
-# changes, and on demand: the release script (tools/release.sh) starts it to get the Windows
-# installer, which it signs locally.
+# Builds Slide Viewer on each platform and checks the slide libraries it bundles (OpenSlide, libCZI)
+# open slides: the Rust tests and a slide on macOS (Apple silicon, Intel) and Windows; the macOS app
+# bundle (tools/check-mac-bundle.sh); the Windows installer, installed and then used to open a slide.
+# Runs when the native side or bundling changes, and on demand: the release script (tools/release.sh)
+# starts it to get the Windows installer, which it signs locally.
 name: Build
 on:
   push:
     branches: [main]
-    paths: ["app/src-tauri/**", "tools/fetch-*.sh", "app/package-lock.json", ".github/workflows/build.yml"]
+    paths: ["app/src-tauri/**", "tools/fetch-*.sh", "tools/mac-bundle-config.py", "tools/check-mac-bundle.sh", "app/package-lock.json", ".github/workflows/build.yml"]
   pull_request:
-    paths: ["app/src-tauri/**", "tools/fetch-*.sh", "app/package-lock.json", ".github/workflows/build.yml"]
+    paths: ["app/src-tauri/**", "tools/fetch-*.sh", "tools/mac-bundle-config.py", "tools/check-mac-bundle.sh", "app/package-lock.json", ".github/workflows/build.yml"]
   workflow_dispatch:
     inputs:
       version:
@@ -22,6 +23,8 @@ permissions:
 env:
   # a small public slide from the OpenSlide test data
   TEST_SLIDE: https://openslide.cs.cmu.edu/download/openslide-testdata/Aperio/CMU-1-Small-Region.svs
+  # and a small .czi, read by libCZI
+  TEST_CZI: https://openslide.cs.cmu.edu/download/openslide-testdata/Zeiss/Zeiss-5-SlidePreview-JXR.czi
 jobs:
   slides:
     name: Slide libraries smoke test (${{ matrix.name }})
@@ -62,6 +65,43 @@ jobs:
           slide="$RUNNER_TEMP/test.svs"
           if [ "${{ matrix.lib }}" = windows ]; then slide="$(cygpath -m "$slide")"; fi
           cargo run --release --example smoke -- "$slide"
+
+  macos:
+    name: macOS app bundle
+    needs: slides
+    # not in the run tools/release.sh starts (it only waits for the Windows installer, and builds,
+    # signs and checks the macOS app itself)
+    if: inputs.version == ''
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Rust (the version in rust-toolchain.toml)
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+          key: macos-bundle
+      - name: Fetch the native libraries
+        run: |
+          tools/fetch-openslide.sh mac
+          tools/fetch-libczi.sh mac
+      - working-directory: app
+        run: npm ci
+      - name: Build the app (this Mac's architecture, unsigned)
+        working-directory: app
+        # the same library list as tools/release.sh; the updater signature needs the release key
+        run: npx tauri build --bundles app --config "$(python3 ../tools/mac-bundle-config.py | jq -c '. * {"bundle":{"createUpdaterArtifacts":false}}')"
+      - name: Check the bundled libraries, and open slides with only those
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/test.svs" "$TEST_SLIDE"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/test.czi" "$TEST_CZI"
+          tools/check-mac-bundle.sh app/src-tauri/target/release/bundle/macos/*.app "$RUNNER_TEMP/test.svs" "$RUNNER_TEMP/test.czi"
 
   windows:
     name: Windows installer

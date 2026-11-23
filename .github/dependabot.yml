@@ -1,0 +1,13 @@
+# Keeps the actions the workflows use (actions/checkout, actions/cache, …) up to date, so a
+# retired version never breaks CI. One grouped pull request a month. npm and Cargo updates are
+# left out on purpose: dependencies change only when we choose to (licences: cargo deny and
+# tests/release.test.ts; advisories: the Dependencies workflow).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]

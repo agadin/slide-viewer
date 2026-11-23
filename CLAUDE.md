@@ -9,11 +9,12 @@ Read `SPEC.md` first. It holds the agreed product decisions and the NDPA format.
   unknown XML when writing annotations back.
 - Run `tools/fetch-openslide.sh mac` once on a new machine before `cargo check` / `tauri dev`.
 - Before committing: `cd app && npx tsc --noEmit && npm run test:logic`, and `cd app/src-tauri && cargo check && cargo test`.
-- CI (`.github/workflows`): **CI** (tsc, logic tests, web build), **Build** (Rust tests and a slide opened on macOS ×2 and
-  Windows, Windows installer), **Formats** (the small public samples, `fetch-format-samples.py --max-mb 120`, through
+- CI (`.github/workflows`): **CI** (tsc, logic tests, web build, accessibility audit `npm run test:a11y`), **Build** (Rust
+  tests and a slide opened on macOS ×2 and Windows, the macOS app bundle via `tools/check-mac-bundle.sh`, the Windows
+  installer), **Release check** (after each release: `tools/check-release.sh <version>`), **Formats** (the small public samples, `fetch-format-samples.py --max-mb 120`, through
   `check-formats.sh` and the ignored sample tests) and **Dependencies** (`cargo deny check`, rules in
   `app/src-tauri/deny.toml`; weekly too). A new Rust dependency under another licence fails `cargo deny`; a new
-  shipped npm package fails `npm run test:logic`.
+  shipped npm package fails `npm run test:logic`. Dependabot only updates the GitHub Actions versions (monthly).
 - `test-data/` and the real slides in MSG's `images/` are course material: never commit them.
 - Help pages live in `docs/help/*.md`; update the page when a feature changes.
 
@@ -40,7 +41,9 @@ The GitHub releases page (`agadin/slide-viewer`) is the record of versions. It m
 2. Bump all five files to the new version, run `cd app/src-tauri && cargo check`, and commit as `v<version>` (e.g. `v0.1.1`). Push to `main`.
 3. `tools/release.sh <version> "<notes for users>"`. It refuses to run unless HEAD is `origin/main` and the version files say `<version>`. It starts the Windows build on GitHub Actions (Build workflow, which also installs the result and opens a slide using only the installed DLLs), fetches OpenSlide (and libCZI, via `tools/fetch-libczi.sh`) and bundles every dylib in `app/src-tauri/frameworks/`, builds, signs and notarizes the universal macOS app and DMG, waits for the Windows installer and signs it for the updater locally (the updater key never goes to GitHub), writes `latest.json` (Apple silicon, Intel, Windows) and creates the GitHub release on that commit. It takes 10–15 minutes; run it in the background. If only the Windows build fails, fix it and rerun; `SKIP_WINDOWS=1` releases macOS only (say so in the notes).
 4. Nothing to revert: the script doesn't rewrite version files. `git status` should be clean.
-5. Check: `gh release view v<version>` lists `Slide-Viewer_<version>_macOS.dmg`, `Slide-Viewer.app.tar.gz` and its `.sig`, `Slide-Viewer_<version>_Windows-x64-setup.exe` and its `.sig`, and `latest.json`, and the release is marked Latest.
+5. Check: the **Release check** workflow runs by itself when the release is published (or run
+   `tools/check-release.sh <version>`; needs `minisign`): latest.json names the version and all three platforms,
+   and every update download verifies against the updater key. Also `gh release view v<version>` lists `Slide-Viewer_<version>_macOS.dmg`, `Slide-Viewer.app.tar.gz` and its `.sig`, `Slide-Viewer_<version>_Windows-x64-setup.exe` and its `.sig`, and `latest.json`, and the release is marked Latest.
 
 Notes:
 
