@@ -23,7 +23,7 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Rust (the version in rust-toolchain.toml)
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
@@ -35,7 +35,7 @@ jobs:
           tools/fetch-openslide.sh mac
           tools/fetch-libczi.sh mac
       - name: Restore the samples
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: test-data/formats
           key: format-samples-${{ hashFiles('tools/fetch-format-samples.py') }}
