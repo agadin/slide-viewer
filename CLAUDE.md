@@ -8,6 +8,8 @@ Read `SPEC.md` first. It holds the agreed product decisions and the NDPA format.
 - NDPA compatibility with NDP.view2 and with MSG's `parseNdpa` is the top correctness requirement. Never drop
   unknown XML when writing annotations back.
 - Run `tools/fetch-openslide.sh mac` once on a new machine before `cargo check` / `tauri dev`.
+- `main` only takes pull requests (GitHub ruleset "main: pull requests only": no direct pushes, force pushes or
+  deletion). Work on a branch, push it, open a PR with `gh pr create`; the user reviews and merges.
 - Before committing: `cd app && npx tsc --noEmit && npm run test:logic`, and `cd app/src-tauri && cargo check && cargo test`.
 - CI (`.github/workflows`): **CI** (tsc, logic tests, web build, accessibility audit `npm run test:a11y`), **Build** (Rust
   tests and a slide opened on macOS ×2 and Windows, the macOS app bundle via `tools/check-mac-bundle.sh`, the Windows
@@ -37,8 +39,8 @@ The GitHub releases page (`agadin/slide-viewer`) is the record of versions. It m
 
 **Steps**
 
-1. `gh release list --limit 5` and `git status`. Everything to ship must be committed and pushed to `main`.
-2. Bump all five files to the new version, run `cd app/src-tauri && cargo check`, and commit as `v<version>` (e.g. `v0.1.1`). Push to `main`.
+1. `gh release list --limit 5` and `git status`. Everything to ship must be merged into `main`.
+2. On a branch `release-<version>`, bump all five files to the new version, run `cd app/src-tauri && cargo check`, and commit as `v<version>` (e.g. `v0.1.1`). Open a pull request titled `v<version>` and **squash-merge** it (the Build workflow skips a push whose message starts with `v0.`, because release.sh starts its own run; a plain merge commit would say "Merge pull request …"). Then `git checkout main && git pull`.
 3. `tools/release.sh <version> "<notes for users>"`. It refuses to run unless HEAD is `origin/main` and the version files say `<version>`. It starts the Windows build on GitHub Actions (Build workflow, which also installs the result and opens a slide using only the installed DLLs), fetches OpenSlide (and libCZI, via `tools/fetch-libczi.sh`) and bundles every dylib in `app/src-tauri/frameworks/`, builds, signs and notarizes the universal macOS app and DMG, waits for the Windows installer and signs it for the updater locally (the updater key never goes to GitHub), writes `latest.json` (Apple silicon, Intel, Windows) and creates the GitHub release on that commit. It takes 10–15 minutes; run it in the background. If only the Windows build fails, fix it and rerun; `SKIP_WINDOWS=1` releases macOS only (say so in the notes).
 4. Nothing to revert: the script doesn't rewrite version files. `git status` should be clean.
 5. Check: the **Release check** workflow runs by itself when the release is published (or run
